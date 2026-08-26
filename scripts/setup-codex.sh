@@ -12,7 +12,7 @@ vercel_cli() {
   pnpm dlx vercel@latest "$@"
 }
 
-vercel_cli link --yes --scope clearjar-studio --project asoebi
+vercel_cli link --yes --cwd apps/web --scope clearjar-studio --project asoebi
 
 vercel_cli env pull .env.local \
   --environment=development \
