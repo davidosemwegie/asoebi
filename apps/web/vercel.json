@@ -1,3 +1,3 @@
 {
-  "buildCommand": "cd ../../packages/backend && pnpm exec convex deploy --cmd 'cd ../../apps/web && pnpm build' --cmd-url-env-var-name NEXT_PUBLIC_CONVEX_URL"
+  "buildCommand": "cd ../../packages/backend && pnpm exec convex deploy --cmd 'cd ../../apps/web && NEXT_PUBLIC_CONVEX_SITE_URL=\"$CONVEX_SITE_URL\" pnpm build' --cmd-url-env-var-name NEXT_PUBLIC_CONVEX_URL"
 }
