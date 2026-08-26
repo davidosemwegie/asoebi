@@ -45,8 +45,9 @@ Primary references:
    `getAuthConfigProvider()`.
 5. Add `packages/backend/convex/auth.ts` with the component adapter, Convex
    plugin, email/password enabled, and a validated current-user query.
-6. Allow localhost, the production aliases, and only Asoebi's ClearJar Vercel
-   preview host pattern in Better Auth's dynamic base URL configuration.
+6. Allow localhost, David's exact Tailscale development host, the production
+   aliases, and only Asoebi's ClearJar Vercel preview host pattern in Better
+   Auth's dynamic base URL configuration.
 7. Register Better Auth HTTP actions in `packages/backend/convex/http.ts`.
 8. Run `pnpm --filter @workspace/backend exec convex dev --once` to mount the
    component and regenerate `components.betterAuth`.
@@ -122,6 +123,13 @@ Then verify the runtime flow:
 10. Push the branch, wait for Vercel/Convex preview deployment checks, and run
     the same smoke flow against the protected preview with `vercel curl` where
     appropriate.
+
+For development through Tailscale, use
+`http://davids-mac-mini.tailfca955.ts.net:3000`. Next.js permits that exact
+hostname for development assets, Better Auth permits that exact host and port,
+and the development deployment uses non-secure cookies because its `SITE_URL`
+is HTTP. Preview and production retain secure cookies because their `SITE_URL`
+values are HTTPS.
 
 ## Current authentication boundary
 
