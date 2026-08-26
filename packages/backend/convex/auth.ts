@@ -17,6 +17,7 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
       allowedHosts: [
         "localhost:3000",
         "127.0.0.1:3000",
+        "davids-mac-mini.tailfca955.ts.net:3000",
         "asoebi-web.vercel.app",
         "asoebi-clearjar-studio.vercel.app",
         "asoebi-*-clearjar-studio.vercel.app",
@@ -29,6 +30,9 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
+    },
+    advanced: {
+      useSecureCookies: !env.SITE_URL.startsWith("http://"),
     },
     plugins: [convex({ authConfig })],
   })
