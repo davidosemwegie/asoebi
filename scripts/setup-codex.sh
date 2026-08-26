@@ -8,6 +8,8 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+pnpm install --frozen-lockfile
+
 vercel_cli() {
   pnpm dlx vercel@latest "$@"
 }
