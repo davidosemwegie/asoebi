@@ -99,7 +99,7 @@ Guests access an event through its private link and must have an account before 
 - **FR-EVENT-1:** An organizer can create, edit, publish, close, reopen, and archive an event.
 - **FR-EVENT-2:** An event includes a name, description, date, location or location note, contact information, and optional cover image.
 - **FR-EVENT-3:** An event uses exactly one organizer-selected currency, defaulting to NGN. The product does not convert currencies.
-- **FR-EVENT-4:** An organizer can set an optional ordering deadline. When the deadline passes, new orders and guest edits are blocked.
+- **FR-EVENT-4:** An organizer must set an ordering deadline. When the deadline passes, new orders and guest edits are blocked.
 - **FR-EVENT-5:** Closing an event immediately blocks new orders and guest edits without removing existing order access.
 - **FR-EVENT-6:** Publishing requires at least one available item, external payment instructions, and one fulfillment option.
 
