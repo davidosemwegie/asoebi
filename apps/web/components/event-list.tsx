@@ -15,6 +15,7 @@ import {
 } from "@workspace/ui/components/card"
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -40,10 +41,12 @@ export function EventList() {
             Create your first event and start planning the guest ordering
             experience.
           </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
           <Button render={<Link href="/events/new" />}>
             <PlusIcon aria-hidden="true" /> Create event
           </Button>
-        </EmptyHeader>
+        </EmptyContent>
       </Empty>
     )
   }

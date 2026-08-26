@@ -6,6 +6,7 @@ import {
   CalendarDaysIcon,
   Clock3Icon,
   MapPinIcon,
+  SearchXIcon,
   UserRoundIcon,
 } from "lucide-react"
 
@@ -18,6 +19,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@workspace/ui/components/empty"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 
 export function EventDetails({ eventId }: { eventId: string }) {
@@ -29,17 +38,20 @@ export function EventDetails({ eventId }: { eventId: string }) {
 
   if (event === null) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Event not found</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-muted-foreground">
+      <Empty className="min-h-80 border">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <SearchXIcon aria-hidden="true" />
+          </EmptyMedia>
+          <EmptyTitle>Event not found</EmptyTitle>
+          <EmptyDescription>
             This event does not exist, or you do not have access to it.
-          </p>
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
           <Button render={<Link href="/" />}>Return home</Button>
-        </CardContent>
-      </Card>
+        </EmptyContent>
+      </Empty>
     )
   }
 
