@@ -1,0 +1,17 @@
+{
+  "name": "@workspace/backend",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "convex dev",
+    "setup": "convex dev --until-success",
+    "typecheck": "tsc --noEmit -p convex"
+  },
+  "dependencies": {
+    "convex": "^1.45.0"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
