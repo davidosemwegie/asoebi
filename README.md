@@ -8,7 +8,7 @@ Install dependencies and link the repository to the existing Vercel project:
 
 ```bash
 pnpm install
-vercel link --repo --yes --scope clearjar-studio --project asoebi
+vercel link --yes --scope clearjar-studio --project asoebi
 ```
 
 Pull the development environment for both the web app and the Convex backend,
