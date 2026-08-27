@@ -520,6 +520,11 @@ async function applyProviderUpdate(
   ) {
     return
   }
+  const firstProviderEvent =
+    recordsProviderEvent && delivery.providerEventAt === undefined
+  const preservesHigherDeliveryStatus =
+    firstProviderEvent &&
+    precedence[update.status] < precedence[delivery.status]
   if (
     !recordsProviderEvent &&
     delivery.providerEventAt !== undefined &&
@@ -554,8 +559,10 @@ async function applyProviderUpdate(
   const now = Date.now()
   await ctx.db.patch(delivery._id, {
     ...(providerId ? { providerId } : {}),
-    status: update.status,
-    error: update.reason?.slice(0, MAX_ERROR_LENGTH),
+    status: preservesHigherDeliveryStatus ? delivery.status : update.status,
+    error: preservesHigherDeliveryStatus
+      ? delivery.error
+      : update.reason?.slice(0, MAX_ERROR_LENGTH),
     ...(recordsProviderEvent
       ? { providerEventAt: eventAt, providerEventType: eventType }
       : {}),
@@ -568,13 +575,18 @@ async function applyProviderUpdate(
     updatedAt: now,
   })
   const notificationPermanent = suppressedStatuses.has(notification.status)
+  const preservesHigherNotificationStatus =
+    firstProviderEvent &&
+    precedence[update.status] < precedence[notification.status]
   if (
     update.permanent ||
     (!notificationPermanent &&
       notification.activeAttemptNumber === delivery.attemptNumber)
   ) {
     await ctx.db.patch(notification._id, {
-      status: update.status,
+      status: preservesHigherNotificationStatus
+        ? notification.status
+        : update.status,
       ...(providerId ? { latestProviderId: providerId } : {}),
       ...(recordsProviderEvent
         ? {
@@ -582,10 +594,15 @@ async function applyProviderUpdate(
             latestProviderEventType: eventType,
           }
         : {}),
-      suppressionReason: update.permanent
-        ? (update.reason?.slice(0, MAX_ERROR_LENGTH) ?? "Delivery is blocked.")
-        : notification.suppressionReason,
-      retryBlockedReason: undefined,
+      suppressionReason: preservesHigherNotificationStatus
+        ? notification.suppressionReason
+        : update.permanent
+          ? (update.reason?.slice(0, MAX_ERROR_LENGTH) ??
+            "Delivery is blocked.")
+          : notification.suppressionReason,
+      retryBlockedReason: preservesHigherNotificationStatus
+        ? notification.retryBlockedReason
+        : undefined,
       updatedAt: now,
     })
   }

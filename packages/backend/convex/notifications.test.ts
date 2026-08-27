@@ -461,6 +461,44 @@ describe("provider event reconciliation", () => {
     ])
   })
 
+  it("records a first late sent event without lowering a component-delivered status", async () => {
+    const t = createTest()
+    const notificationId = await enqueue(t, {
+      dedupeKey: "component-delivered-before-sent:1",
+    })
+    const componentEmailId = await enqueueRendered(t, notificationId)
+
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId,
+      attemptNumber: 1,
+      componentEmailId,
+      providerId: "provider-late-sent",
+      status: "delivered",
+      permanent: false,
+    })
+
+    const sentAt = "2020-01-01T12:00:00.000Z"
+    await t.mutation(internal.notifications.handleEmailEvent, {
+      id: componentEmailId as EmailId,
+      event: sentEvent("provider-late-sent", sentAt),
+    })
+
+    expect(await readNotification(t, notificationId)).toMatchObject({
+      status: "delivered",
+      latestProviderId: "provider-late-sent",
+      latestProviderEventAt: Date.parse(sentAt),
+      latestProviderEventType: "email.sent",
+    })
+    expect(await readDeliveries(t, notificationId)).toEqual([
+      expect.objectContaining({
+        status: "delivered",
+        providerId: "provider-late-sent",
+        providerEventAt: Date.parse(sentAt),
+        providerEventType: "email.sent",
+      }),
+    ])
+  })
+
   it("backfills a component upgrade after sent while preserving provider metadata", async () => {
     const t = createTest()
     const notificationId = await enqueue(t, {
