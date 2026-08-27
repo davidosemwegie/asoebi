@@ -96,12 +96,13 @@ Guests access an event through its private link and must have an account before 
 
 ### Event management
 
-- **FR-EVENT-1:** An organizer can create, edit, publish, close, reopen, and archive an event.
+- **FR-EVENT-1:** An organizer can create, edit, permanently delete a draft, publish, close, reopen, and archive an event.
 - **FR-EVENT-2:** An event includes a name, description, date, location or location note, contact information, and optional cover image.
-- **FR-EVENT-3:** An event uses exactly one organizer-selected currency, defaulting to NGN. The product does not convert currencies.
+- **FR-EVENT-3:** An event uses exactly one organizer-selected currency, defaulting to NGN. The currency can change until the first catalog item is added and is locked afterward. The product does not convert currencies.
 - **FR-EVENT-4:** An organizer must set an ordering deadline. When the deadline passes, new orders and guest edits are blocked.
 - **FR-EVENT-5:** Closing an event immediately blocks new orders and guest edits without removing existing order access.
 - **FR-EVENT-6:** Publishing requires at least one available item, external payment instructions, and one fulfillment option.
+- **FR-EVENT-7:** Permanent deletion is available only for a draft event and atomically removes the event and its draft item catalog. Published, closed, and archived events cannot be permanently deleted.
 
 ### Item catalog and inventory
 
@@ -171,7 +172,7 @@ Guests access an event through its private link and must have an account before 
 
 ### Event
 
-- `Draft`: Editable by the owner and unavailable to guests.
+- `Draft`: Editable by the owner and unavailable to guests. It can be permanently deleted together with its draft item catalog.
 - `Published`: Available through the private event link while ordering is open.
 - `Closed`: Existing orders remain accessible, but new orders and guest edits are blocked.
 - `Archived`: Hidden from the organizer's active list; order data remains retained.
@@ -244,6 +245,7 @@ The MVP is validated when one real event completes the following lifecycle with 
 9. **Ordering cutoff:** A closed or expired event blocks new orders and pending guest edits but preserves read access.
 10. **Tenant isolation:** A user cannot access another organizer's dashboard, receipts, personal data, or export by changing a URL or identifier.
 11. **Accurate export:** Filtered CSV rows match the visible orders, line items, statuses, totals, and fulfillment details.
+12. **Draft deletion:** An owner can permanently delete a draft event with catalog items, removing the event and its catalog atomically, while another user cannot delete it and a non-draft event is retained.
 
 ## Future considerations
 
