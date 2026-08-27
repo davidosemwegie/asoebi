@@ -1,25 +1,26 @@
-import { HomeIcon } from "lucide-react"
+import Link from "next/link"
+import { PlusIcon } from "lucide-react"
 
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@workspace/ui/components/empty"
+import { EventList } from "@/components/event-list"
+import { Button } from "@workspace/ui/components/button"
 
 export default function HomePage() {
   return (
-    <Empty className="min-h-[calc(100svh-6rem)] border">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <HomeIcon aria-hidden="true" />
-        </EmptyMedia>
-        <EmptyTitle>Home</EmptyTitle>
-        <EmptyDescription>
-          Your Asoebi workspace is ready. Event planning tools will appear here.
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-3xl font-semibold tracking-tight">
+            Events
+          </h1>
+          <p className="mt-1 text-muted-foreground">
+            Create and manage your celebrations.
+          </p>
+        </div>
+        <Button render={<Link href="/events/new" />}>
+          <PlusIcon aria-hidden="true" /> New event
+        </Button>
+      </div>
+      <EventList />
+    </main>
   )
 }

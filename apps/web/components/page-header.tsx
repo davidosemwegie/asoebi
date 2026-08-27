@@ -13,12 +13,15 @@ import { SidebarTrigger } from "@workspace/ui/components/sidebar"
 
 const pageTitles: Record<string, string> = {
   "/": "Home",
+  "/events/new": "Create event",
   "/settings": "Settings",
 }
 
 export function PageHeader() {
   const pathname = usePathname()
-  const title = pageTitles[pathname] ?? "Asoebi"
+  const title =
+    pageTitles[pathname] ??
+    (pathname.startsWith("/events/") ? "Event details" : "Asoebi")
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
