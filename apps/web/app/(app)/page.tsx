@@ -16,7 +16,7 @@ export default function HomePage() {
             Create and manage your celebrations.
           </p>
         </div>
-        <Button render={<Link href="/events/new" />}>
+        <Button nativeButton={false} render={<Link href="/events/new" />}>
           <PlusIcon aria-hidden="true" /> New event
         </Button>
       </div>

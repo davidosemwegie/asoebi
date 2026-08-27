@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "convex dev",
     "setup": "convex dev --until-success",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p convex"
   },
   "dependencies": {
@@ -14,6 +15,10 @@
     "convex": "^1.45.0"
   },
   "devDependencies": {
-    "typescript": "^5"
+    "@edge-runtime/vm": "^5.0.0",
+    "convex-test": "^0.0.56",
+    "typescript": "^5",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }

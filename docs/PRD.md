@@ -106,7 +106,7 @@ Guests access an event through its private link and must have an account before 
 ### Item catalog and inventory
 
 - **FR-ITEM-1:** An organizer can create, edit, hide, and reorder independent items within an event.
-- **FR-ITEM-2:** Each item includes a name, unit label, price, starting inventory, and optional description and image.
+- **FR-ITEM-2:** Each item includes a name, unit label, price, starting inventory, and optional description.
 - **FR-ITEM-3:** Item quantities are positive whole numbers. A fabric unit such as a five-yard pack is represented as one independently priced item.
 - **FR-ITEM-4:** Guests can combine multiple items and quantities in one order.
 - **FR-ITEM-5:** The product displays current availability and prevents a submitted order from exceeding available inventory.
@@ -251,6 +251,7 @@ The MVP is validated when one real event completes the following lifecycle with 
 - Automated payment collection and reconciliation.
 - Platform billing and monetization.
 - Bundles, discounts, and more advanced catalog options.
+- Optional images for catalog items.
 - Inventory expiry for unpaid orders and automated reminders.
 - Dispatch-provider integration, delivery windows, and live tracking.
 - Additional notification channels and two-way customer support.

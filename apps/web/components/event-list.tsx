@@ -43,7 +43,7 @@ export function EventList() {
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <Button render={<Link href="/events/new" />}>
+          <Button nativeButton={false} render={<Link href="/events/new" />}>
             <PlusIcon aria-hidden="true" /> Create event
           </Button>
         </EmptyContent>
