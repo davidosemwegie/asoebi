@@ -12,8 +12,7 @@ import { Separator } from "@workspace/ui/components/separator"
 import { SidebarTrigger } from "@workspace/ui/components/sidebar"
 
 const pageTitles: Record<string, string> = {
-  "/": "Home",
-  "/events/new": "Create event",
+  "/": "Events",
   "/settings": "Settings",
 }
 

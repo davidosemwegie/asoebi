@@ -23,7 +23,11 @@ import {
 } from "@workspace/ui/components/empty"
 import { Skeleton } from "@workspace/ui/components/skeleton"
 
-export function EventList() {
+export function EventList({
+  onCreate,
+}: {
+  onCreate: (trigger: HTMLElement) => void
+}) {
   const events = useQuery(api.events.listMine)
 
   if (events === undefined)
@@ -43,7 +47,10 @@ export function EventList() {
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <Button nativeButton={false} render={<Link href="/events/new" />}>
+          <Button
+            type="button"
+            onClick={(event) => onCreate(event.currentTarget)}
+          >
             <PlusIcon aria-hidden="true" /> Create event
           </Button>
         </EmptyContent>
