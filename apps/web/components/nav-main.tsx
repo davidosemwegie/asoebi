@@ -40,6 +40,7 @@ export function NavMain({
                 render={<Link href={item.url} />}
                 isActive={isActive}
                 tooltip={item.title}
+                className="relative before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent data-active:text-brand-plum data-active:before:bg-brand-plum dark:data-active:text-brand-powder dark:data-active:before:bg-brand-powder data-active:[&_svg]:text-brand-plum dark:data-active:[&_svg]:text-brand-powder"
               >
                 <Icon aria-hidden="true" />
                 <span>{item.title}</span>

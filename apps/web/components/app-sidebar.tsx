@@ -50,7 +50,7 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link href="/" />}>
-              <span className="flex size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-brand-plum text-brand-powder">
                 <SparklesIcon aria-hidden="true" />
               </span>
               <span className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">

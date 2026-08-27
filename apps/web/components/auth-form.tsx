@@ -101,7 +101,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           href="/"
           className="mx-auto flex items-center gap-2 text-sm font-semibold"
         >
-          <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <span className="flex size-8 items-center justify-center rounded-lg bg-brand-plum text-brand-powder">
             <SparklesIcon aria-hidden="true" />
           </span>
           Asoebi
