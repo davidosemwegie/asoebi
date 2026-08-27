@@ -14,12 +14,36 @@ export const eventFields = v.object({
   description: v.string(),
   eventDate: v.string(),
   orderDeadline: v.string(),
+  orderDeadlineAt: v.optional(v.number()),
+  timeZone: v.optional(v.string()),
   location: v.string(),
   contact: v.string(),
   currency: v.string(),
+  shareToken: v.optional(v.string()),
+  coverStorageId: v.optional(v.id("_storage")),
   status: eventStatus,
   updatedAt: v.number(),
 })
+
+export const fulfillmentType = v.union(
+  v.literal("pickup"),
+  v.literal("delivery")
+)
+
+export const fulfillmentRequiredFields = v.union(
+  v.object({
+    kind: v.literal("pickup"),
+    pickupContact: v.boolean(),
+  }),
+  v.object({
+    kind: v.literal("delivery"),
+    recipientName: v.boolean(),
+    phoneNumber: v.boolean(),
+    address: v.boolean(),
+    availability: v.boolean(),
+    notes: v.boolean(),
+  })
+)
 
 export const itemFields = v.object({
   eventId: v.id("events"),
@@ -35,7 +59,10 @@ export const itemFields = v.object({
 })
 
 export default defineSchema({
-  events: defineTable(eventFields.fields).index("by_ownerId", ["ownerId"]),
+  events: defineTable(eventFields.fields)
+    .index("by_ownerId", ["ownerId"])
+    .index("by_ownerId_and_status", ["ownerId", "status"])
+    .index("by_shareToken", ["shareToken"]),
   items: defineTable(itemFields.fields)
     .index("by_eventId_and_sortOrder", ["eventId", "sortOrder"])
     .index("by_eventId_and_isHidden_and_sortOrder", [
@@ -43,4 +70,34 @@ export default defineSchema({
       "isHidden",
       "sortOrder",
     ]),
+  eventPaymentInstructions: defineTable({
+    eventId: v.id("events"),
+    instructions: v.string(),
+    updatedAt: v.number(),
+  }).index("by_eventId", ["eventId"]),
+  fulfillmentOptions: defineTable({
+    eventId: v.id("events"),
+    name: v.string(),
+    type: fulfillmentType,
+    feeMinor: v.number(),
+    instructions: v.string(),
+    enabled: v.boolean(),
+    requiredFields: fulfillmentRequiredFields,
+    sortOrder: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_eventId_and_sortOrder", ["eventId", "sortOrder"])
+    .index("by_eventId_and_enabled_and_sortOrder", [
+      "eventId",
+      "enabled",
+      "sortOrder",
+    ]),
+  coverUploadClaims: defineTable({
+    eventId: v.id("events"),
+    ownerId: v.string(),
+    contentType: v.string(),
+    size: v.number(),
+    sha256: v.string(),
+    expiresAt: v.number(),
+  }).index("by_eventId", ["eventId"]),
 })

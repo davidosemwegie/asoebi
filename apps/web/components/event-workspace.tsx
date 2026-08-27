@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext } from "react"
+import { createContext, useContext, useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { FunctionReturnType } from "convex/server"
@@ -46,7 +46,13 @@ export function EventWorkspace({
   eventId: string
 }) {
   const pathname = usePathname()
-  const event = useQuery(api.events.get, { eventId })
+  const [queryNow, setQueryNow] = useState(Date.now)
+  const event = useQuery(api.events.get, { eventId, now: queryNow })
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setQueryNow(Date.now()), 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
 
   if (event === undefined) {
     return (
@@ -84,7 +90,11 @@ export function EventWorkspace({
     )
   }
 
-  const activeTab = pathname.endsWith("/catalog") ? "catalog" : "overview"
+  const activeTab = pathname.endsWith("/catalog")
+    ? "items"
+    : pathname.endsWith("/setup")
+      ? "setup"
+      : "overview"
 
   return (
     <EventWorkspaceContext.Provider value={event}>
@@ -99,28 +109,58 @@ export function EventWorkspace({
             </Badge>
             <Badge variant="outline">{event.currency}</Badge>
           </div>
-          <p className="text-sm text-pretty text-muted-foreground">
-            Manage the event details and the items guests will eventually order.
+          <p className="text-base text-pretty text-muted-foreground">
+            Manage event setup, items, guests, and orders in one place.
           </p>
         </header>
 
         <Tabs value={activeTab}>
-          <TabsList variant="line" aria-label="Event sections">
-            <TabsTrigger
-              value="overview"
-              nativeButton={false}
-              render={<Link href={`/events/${event._id}`} />}
+          <div className="pb-1">
+            <TabsList
+              variant="line"
+              aria-label="Event sections"
+              className="h-auto min-h-11 w-full flex-wrap justify-start gap-y-2"
             >
-              Overview
-            </TabsTrigger>
-            <TabsTrigger
-              value="catalog"
-              nativeButton={false}
-              render={<Link href={`/events/${event._id}/catalog`} />}
-            >
-              Catalog
-            </TabsTrigger>
-          </TabsList>
+              <TabsTrigger
+                value="overview"
+                nativeButton={false}
+                render={<Link href={`/events/${event._id}`} />}
+                className="min-h-11 px-3 text-base"
+              >
+                Overview
+              </TabsTrigger>
+              <TabsTrigger
+                value="items"
+                nativeButton={false}
+                render={<Link href={`/events/${event._id}/catalog`} />}
+                className="min-h-11 px-3 text-base"
+              >
+                Items
+              </TabsTrigger>
+              <TabsTrigger
+                value="guests"
+                disabled
+                className="min-h-11 px-3 text-base"
+              >
+                Guests <span className="text-base">Coming soon</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="orders"
+                disabled
+                className="min-h-11 px-3 text-base"
+              >
+                Orders <span className="text-base">Coming soon</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="setup"
+                nativeButton={false}
+                render={<Link href={`/events/${event._id}/setup`} />}
+                className="min-h-11 px-3 text-base"
+              >
+                Event setup
+              </TabsTrigger>
+            </TabsList>
+          </div>
           <TabsContent value={activeTab} className="pt-4">
             {children}
           </TabsContent>

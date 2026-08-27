@@ -9,6 +9,8 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as eventModel from "../eventModel.js";
+import type * as eventSetup from "../eventSetup.js";
 import type * as events from "../events.js";
 import type * as http from "../http.js";
 import type * as items from "../items.js";
@@ -21,6 +23,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  eventModel: typeof eventModel;
+  eventSetup: typeof eventSetup;
   events: typeof events;
   http: typeof http;
   items: typeof items;
