@@ -20,11 +20,13 @@ export function PageHeader() {
   const pathname = usePathname()
   const title =
     pageTitles[pathname] ??
-    (pathname.endsWith("/catalog")
-      ? "Catalog"
-      : pathname.startsWith("/events/")
-        ? "Event overview"
-        : "Asoebi")
+    (pathname.endsWith("/setup")
+      ? "Event setup"
+      : pathname.endsWith("/catalog")
+        ? "Items"
+        : pathname.startsWith("/events/")
+          ? "Event overview"
+          : "Asoebi")
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">

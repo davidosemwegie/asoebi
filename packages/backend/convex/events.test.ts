@@ -107,7 +107,10 @@ describe("event management", () => {
       currency: "  USD  ",
     })
 
-    const event = await client.query(api.events.get, { eventId })
+    const event = await client.query(api.events.get, {
+      eventId,
+      now: Date.now(),
+    })
     expect(event).toMatchObject({
       name: "Ada, Tunde, and family",
       description: "Updated celebration details",
@@ -140,7 +143,10 @@ describe("event management", () => {
         client.mutation(api.events.update, { eventId, ...input })
       ).rejects.toThrow(message)
 
-      const event = await client.query(api.events.get, { eventId })
+      const event = await client.query(api.events.get, {
+        eventId,
+        now: Date.now(),
+      })
       expect(event).toMatchObject(validEvent)
     }
   )
@@ -151,13 +157,13 @@ describe("event management", () => {
     const eventId = await createEvent(client)
 
     await expect(
-      client.query(api.events.get, { eventId })
+      client.query(api.events.get, { eventId, now: Date.now() })
     ).resolves.toMatchObject({ hasCatalogItems: false })
 
     await client.mutation(api.items.create, { eventId, ...validItem })
 
     await expect(
-      client.query(api.events.get, { eventId })
+      client.query(api.events.get, { eventId, now: Date.now() })
     ).resolves.toMatchObject({ hasCatalogItems: true })
     await expect(
       client.mutation(api.events.update, {
@@ -177,7 +183,7 @@ describe("event management", () => {
       })
     ).resolves.toBeNull()
     await expect(
-      client.query(api.events.get, { eventId })
+      client.query(api.events.get, { eventId, now: Date.now() })
     ).resolves.toMatchObject({
       name: "Updated name",
       currency: "NGN",
@@ -200,7 +206,7 @@ describe("event management", () => {
     })
 
     await expect(
-      client.query(api.events.get, { eventId })
+      client.query(api.events.get, { eventId, now: Date.now() })
     ).resolves.toMatchObject({
       name: "Published event update",
       status: "published",
@@ -250,7 +256,7 @@ describe("event management", () => {
     ).rejects.toThrow("Event not found")
 
     await expect(
-      owner.query(api.events.get, { eventId })
+      owner.query(api.events.get, { eventId, now: Date.now() })
     ).resolves.toMatchObject({ name: validEvent.name })
   })
 
