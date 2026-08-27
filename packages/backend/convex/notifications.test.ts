@@ -413,6 +413,54 @@ describe("notification outbox", () => {
 })
 
 describe("provider event reconciliation", () => {
+  it("lets a real provider outcome predating component reconciliation win", async () => {
+    const t = createTest()
+    const notificationId = await enqueue(t, {
+      dedupeKey: "component-before-provider:1",
+    })
+    const componentEmailId = await enqueueRendered(t, notificationId)
+
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId,
+      attemptNumber: 1,
+      componentEmailId,
+      providerId: "provider-after-component-poll",
+      status: "sent",
+      permanent: false,
+    })
+
+    expect(await readNotification(t, notificationId)).toMatchObject({
+      status: "sent",
+      latestProviderId: "provider-after-component-poll",
+    })
+    expect(await readNotification(t, notificationId)).not.toHaveProperty(
+      "latestProviderEventAt"
+    )
+    expect(await readDeliveries(t, notificationId)).toEqual([
+      expect.not.objectContaining({ providerEventAt: expect.any(Number) }),
+    ])
+
+    const providerCreatedAt = "2020-01-01T12:00:00.000Z"
+    await t.mutation(internal.notifications.handleEmailEvent, {
+      id: componentEmailId as EmailId,
+      event: deliveredEvent("provider-after-component-poll", providerCreatedAt),
+    })
+
+    expect(await readNotification(t, notificationId)).toMatchObject({
+      status: "delivered",
+      latestProviderId: "provider-after-component-poll",
+      latestProviderEventAt: Date.parse(providerCreatedAt),
+      latestProviderEventType: "email.delivered",
+    })
+    expect(await readDeliveries(t, notificationId)).toEqual([
+      expect.objectContaining({
+        status: "delivered",
+        providerEventAt: Date.parse(providerCreatedAt),
+        providerEventType: "email.delivered",
+      }),
+    ])
+  })
+
   it("ignores duplicate and older lower-precedence events", async () => {
     const t = createTest()
     const notificationId = await enqueue(t)

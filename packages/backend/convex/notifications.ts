@@ -508,19 +508,23 @@ async function applyProviderUpdate(
   eventType: string,
   eventAt: number,
   providerId: string | undefined,
-  update: ProviderUpdate
+  update: ProviderUpdate,
+  recordsProviderEvent = true
 ) {
   const notification = await ctx.db.get(delivery.notificationId)
   if (!notification) return
   if (
+    recordsProviderEvent &&
     delivery.providerEventAt === eventAt &&
     delivery.providerEventType === eventType
   ) {
     return
   }
+  if (!recordsProviderEvent && delivery.providerEventAt !== undefined) return
   const currentPermanent = suppressedStatuses.has(delivery.status)
   if (currentPermanent && !update.permanent) return
   if (
+    recordsProviderEvent &&
     currentPermanent &&
     update.permanent &&
     delivery.providerEventAt !== undefined &&
@@ -531,6 +535,7 @@ async function applyProviderUpdate(
     return
   }
   if (
+    recordsProviderEvent &&
     !update.permanent &&
     delivery.providerEventAt !== undefined &&
     (eventAt < delivery.providerEventAt ||
@@ -545,8 +550,9 @@ async function applyProviderUpdate(
     ...(providerId ? { providerId } : {}),
     status: update.status,
     error: update.reason?.slice(0, MAX_ERROR_LENGTH),
-    providerEventAt: eventAt,
-    providerEventType: eventType,
+    ...(recordsProviderEvent
+      ? { providerEventAt: eventAt, providerEventType: eventType }
+      : {}),
     sentAt: update.status === "sent" ? eventAt : delivery.sentAt,
     deliveredAt: update.status === "delivered" ? eventAt : delivery.deliveredAt,
     failedAt:
@@ -564,8 +570,12 @@ async function applyProviderUpdate(
     await ctx.db.patch(notification._id, {
       status: update.status,
       ...(providerId ? { latestProviderId: providerId } : {}),
-      latestProviderEventAt: eventAt,
-      latestProviderEventType: eventType,
+      ...(recordsProviderEvent
+        ? {
+            latestProviderEventAt: eventAt,
+            latestProviderEventType: eventType,
+          }
+        : {}),
       suppressionReason: update.permanent
         ? (update.reason?.slice(0, MAX_ERROR_LENGTH) ?? "Delivery is blocked.")
         : notification.suppressionReason,
@@ -661,7 +671,8 @@ export const reconcileComponentStatus = internalMutation({
         status: args.status,
         reason: args.reason,
         permanent: args.permanent,
-      }
+      },
+      false
     )
     if (args.retryAllowed === false) {
       const notification = await ctx.db.get(args.notificationId)
