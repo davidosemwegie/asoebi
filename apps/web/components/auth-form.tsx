@@ -1,19 +1,13 @@
 "use client"
 
 import { useState, type FormEvent } from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { LoaderCircleIcon, SparklesIcon } from "lucide-react"
+import { LoaderCircleIcon } from "lucide-react"
 
 import { authClient } from "@/lib/auth-client"
 import { Button } from "@workspace/ui/components/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@workspace/ui/components/card"
 import {
   Field,
   FieldDescription,
@@ -22,6 +16,7 @@ import {
   FieldLabel,
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
+import { Separator } from "@workspace/ui/components/separator"
 
 type AuthMode = "login" | "signup"
 
@@ -95,109 +90,184 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background p-5">
-      <div className="flex w-full max-w-md flex-col gap-7">
-        <Link href="/" className="mx-auto flex items-center gap-2.5">
-          <span className="flex size-8 items-center justify-center rounded-lg bg-brand-plum text-brand-powder">
-            <SparklesIcon aria-hidden="true" />
-          </span>
-          <span className="font-display text-xl font-medium tracking-tight">
-            Aso Circle
-          </span>
-        </Link>
+    <main className="min-h-svh bg-brand-blackberry text-brand-ivory">
+      <div className="grid min-h-svh lg:grid-cols-[minmax(0,0.92fr)_minmax(34rem,1.08fr)]">
+        <section className="flex min-h-svh flex-col px-6 py-7 sm:px-10 sm:py-9 lg:px-12 lg:py-10 xl:px-16">
+          <Link href="/" className="flex w-fit items-center gap-3">
+            <Image
+              src="/aso-circle-icon.png"
+              alt=""
+              width={40}
+              height={40}
+              priority
+              className="size-10 rounded-xl"
+            />
+            <span className="font-display text-xl font-medium tracking-tight">
+              Aso Circle
+            </span>
+          </Link>
 
-        <Card className="border-border/80 bg-card/70 px-2 py-2 shadow-[0_24px_70px_-50px_rgba(50,23,39,0.55)] ring-0 sm:px-4 sm:py-4 dark:shadow-black/20">
-          <CardHeader className="pb-2 text-center">
-            <CardTitle className="font-display text-3xl font-medium tracking-tight">
-              <h1>{copy.title}</h1>
-            </CardTitle>
-            <CardDescription className="mx-auto max-w-xs leading-relaxed">
-              {copy.description}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit}>
-              <FieldGroup>
-                {mode === "signup" ? (
+          <div className="flex flex-1 items-center py-12 lg:py-16">
+            <div className="mx-auto w-full max-w-md">
+              <div className="mb-8 flex items-center gap-4">
+                <Separator className="max-w-24 bg-brand-powder/25" />
+                <p className="text-[0.65rem] font-semibold tracking-[0.22em] text-brand-powder uppercase">
+                  Account / Secure
+                </p>
+              </div>
+
+              <h1 className="font-display text-5xl leading-[0.95] font-medium tracking-tight text-balance sm:text-6xl">
+                {copy.title}
+              </h1>
+              <p className="mt-5 max-w-sm text-sm leading-6 text-brand-ivory/60">
+                {copy.description}
+              </p>
+
+              <form onSubmit={handleSubmit} className="mt-10">
+                <FieldGroup>
+                  {mode === "signup" ? (
+                    <Field>
+                      <FieldLabel
+                        htmlFor="name"
+                        className="text-brand-ivory/90"
+                      >
+                        Name
+                      </FieldLabel>
+                      <Input
+                        id="name"
+                        name="name"
+                        type="text"
+                        autoComplete="name"
+                        placeholder="Your name"
+                        minLength={2}
+                        required
+                        disabled={isPending}
+                        className="border-brand-ivory/20 bg-brand-ivory/5 text-brand-ivory placeholder:text-brand-ivory/35 focus-visible:border-brand-powder focus-visible:ring-brand-powder/20"
+                      />
+                    </Field>
+                  ) : null}
+
                   <Field>
-                    <FieldLabel htmlFor="name">Name</FieldLabel>
+                    <FieldLabel htmlFor="email" className="text-brand-ivory/90">
+                      Email
+                    </FieldLabel>
                     <Input
-                      id="name"
-                      name="name"
-                      type="text"
-                      autoComplete="name"
-                      placeholder="Your name"
-                      minLength={2}
+                      id="email"
+                      name="email"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
                       required
                       disabled={isPending}
+                      className="border-brand-ivory/20 bg-brand-ivory/5 text-brand-ivory placeholder:text-brand-ivory/35 focus-visible:border-brand-powder focus-visible:ring-brand-powder/20"
                     />
                   </Field>
-                ) : null}
 
-                <Field>
-                  <FieldLabel htmlFor="email">Email</FieldLabel>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    required
-                    disabled={isPending}
-                  />
-                </Field>
-
-                <Field>
-                  <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <Input
-                    id="password"
-                    name="password"
-                    type="password"
-                    autoComplete={
-                      mode === "signup" ? "new-password" : "current-password"
-                    }
-                    minLength={8}
-                    maxLength={128}
-                    required
-                    disabled={isPending}
-                    aria-describedby={
-                      mode === "signup" ? "password-description" : undefined
-                    }
-                  />
-                  {mode === "signup" ? (
-                    <FieldDescription id="password-description">
-                      Use 8 to 128 characters.
-                    </FieldDescription>
-                  ) : null}
-                </Field>
-
-                {errorMessage ? (
-                  <FieldError aria-live="polite">{errorMessage}</FieldError>
-                ) : null}
-
-                <Field>
-                  <Button type="submit" className="w-full" disabled={isPending}>
-                    {isPending ? (
-                      <LoaderCircleIcon
-                        data-icon="inline-start"
-                        className="animate-spin"
-                        aria-hidden="true"
-                      />
+                  <Field>
+                    <FieldLabel
+                      htmlFor="password"
+                      className="text-brand-ivory/90"
+                    >
+                      Password
+                    </FieldLabel>
+                    <Input
+                      id="password"
+                      name="password"
+                      type="password"
+                      autoComplete={
+                        mode === "signup" ? "new-password" : "current-password"
+                      }
+                      minLength={8}
+                      maxLength={128}
+                      required
+                      disabled={isPending}
+                      aria-describedby={
+                        mode === "signup" ? "password-description" : undefined
+                      }
+                      className="border-brand-ivory/20 bg-brand-ivory/5 text-brand-ivory focus-visible:border-brand-powder focus-visible:ring-brand-powder/20"
+                    />
+                    {mode === "signup" ? (
+                      <FieldDescription
+                        id="password-description"
+                        className="text-brand-ivory/50"
+                      >
+                        Use 8 to 128 characters.
+                      </FieldDescription>
                     ) : null}
-                    {isPending ? copy.pending : copy.submit}
-                  </Button>
-                  <FieldDescription className="text-center">
-                    {copy.alternatePrompt}{" "}
-                    <Link href={copy.alternateHref}>
-                      {copy.alternateAction}
-                    </Link>
-                  </FieldDescription>
-                </Field>
-              </FieldGroup>
-            </form>
-          </CardContent>
-        </Card>
+                  </Field>
+
+                  {errorMessage ? (
+                    <FieldError aria-live="polite">{errorMessage}</FieldError>
+                  ) : null}
+
+                  <Field>
+                    <Button
+                      type="submit"
+                      className="w-full border-brand-ivory bg-brand-ivory text-brand-blackberry hover:bg-brand-ivory/90"
+                      disabled={isPending}
+                    >
+                      {isPending ? (
+                        <LoaderCircleIcon
+                          data-icon="inline-start"
+                          className="animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      {isPending ? copy.pending : copy.submit}
+                    </Button>
+                    <FieldDescription className="text-center text-brand-ivory/55">
+                      {copy.alternatePrompt}{" "}
+                      <Link
+                        href={copy.alternateHref}
+                        className="text-brand-ivory underline decoration-brand-powder/50 underline-offset-4 transition-colors hover:text-brand-powder"
+                      >
+                        {copy.alternateAction}
+                      </Link>
+                    </FieldDescription>
+                  </Field>
+                </FieldGroup>
+              </form>
+            </div>
+          </div>
+
+          <div className="hidden items-center justify-between text-[0.6rem] tracking-[0.2em] text-brand-ivory/40 uppercase sm:flex">
+            <span>Your people. Your style.</span>
+            <span>Private workspace access</span>
+          </div>
+        </section>
+
+        <aside className="hidden p-3 pl-0 lg:block">
+          <div className="relative h-full min-h-[calc(100svh-1.5rem)] overflow-hidden rounded-3xl border border-brand-ivory/10">
+            <Image
+              src="/images/aso-oke-editorial.jpg"
+              alt="A collection of handwoven Nigerian Aso Oke textiles in Aso Circle's signature colors"
+              fill
+              priority
+              sizes="(min-width: 1024px) 55vw, 0px"
+              className="object-cover"
+            />
+            <div
+              className="absolute inset-0 bg-brand-blackberry/30"
+              aria-hidden="true"
+            />
+            <div className="absolute inset-x-0 top-0 flex items-center justify-between p-8 text-[0.65rem] tracking-[0.2em] text-brand-ivory/80 uppercase">
+              <span>Handwoven / 01</span>
+              <span>Aso Oke</span>
+            </div>
+            <div className="absolute right-8 bottom-8 left-8 max-w-xl">
+              <h2 className="max-w-lg font-display text-4xl leading-[1.02] font-medium text-balance text-brand-ivory xl:text-5xl">
+                Tradition, woven into every celebration.
+              </h2>
+              <div className="mt-6 flex items-center gap-4">
+                <Separator className="max-w-10 bg-brand-powder/70" />
+                <p className="max-w-sm text-xs leading-5 text-brand-ivory/70">
+                  Coordinate your circle with clarity, care, and style.
+                </p>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
     </main>
   )
