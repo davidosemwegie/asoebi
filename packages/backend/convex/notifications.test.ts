@@ -107,6 +107,15 @@ async function readDeliveries(
   )
 }
 
+async function finishAllScheduledFunctions(t: TestHarness) {
+  vi.useFakeTimers()
+  try {
+    await t.finishAllScheduledFunctions(vi.runAllTimers)
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 async function enqueueRendered(
   t: TestHarness,
   notificationId: Id<"notifications">,
@@ -142,6 +151,14 @@ function sentEvent(providerId: string, createdAt: string): EmailEvent {
 function deliveredEvent(providerId: string, createdAt: string): EmailEvent {
   return {
     type: "email.delivered",
+    created_at: createdAt,
+    data: commonEventData(providerId, createdAt),
+  }
+}
+
+function delayedEvent(providerId: string, createdAt: string): EmailEvent {
+  return {
+    type: "email.delivery_delayed",
     created_at: createdAt,
     data: commonEventData(providerId, createdAt),
   }
@@ -299,6 +316,30 @@ describe("notification outbox", () => {
     ])
   })
 
+  it("returns provider-safe failure copy while retaining private diagnostics", async () => {
+    const t = createTest()
+    const { client, userId } = await createUser(t, "safe-error@example.com")
+    const notificationId = await enqueue(t, { ownerId: userId })
+    const privateError =
+      "RESEND_API_KEY is not configured: raw provider response 500"
+    await t.mutation(internal.notifications.markAttemptFailed, {
+      notificationId,
+      attemptNumber: 1,
+      error: privateError,
+    })
+
+    const view = await client.query(api.notifications.getMine, {
+      notificationId,
+    })
+    expect(view?.deliveries[0]?.error).toBe(
+      "Delivery was not completed. You can try again."
+    )
+    expect(view?.deliveries[0]?.error).not.toContain("RESEND_API_KEY")
+    expect(await readDeliveries(t, notificationId)).toEqual([
+      expect.objectContaining({ error: privateError }),
+    ])
+  })
+
   it("isolates status and retry operations to the notification owner", async () => {
     const t = createTest()
     const owner = await createUser(t, "owner@example.com")
@@ -408,6 +449,53 @@ describe("provider event reconciliation", () => {
     })
   })
 
+  it.each([
+    {
+      name: "delivery delay",
+      event: delayedEvent,
+      expectedStatus: "delayed",
+    },
+    {
+      name: "provider failure",
+      event: failedEvent,
+      expectedStatus: "failed",
+    },
+    {
+      name: "transient bounce",
+      event: (providerId: string, createdAt: string) =>
+        bouncedEvent(providerId, createdAt, "Transient"),
+      expectedStatus: "failed",
+    },
+  ] as const)(
+    "lets a newer $name supersede sent",
+    async ({ event, expectedStatus }) => {
+      const t = createTest()
+      const notificationId = await enqueue(t, {
+        dedupeKey: `newer:${expectedStatus}:${event.name}`,
+      })
+      const componentEmailId = await enqueueRendered(t, notificationId)
+      await t.mutation(internal.notifications.handleEmailEvent, {
+        id: componentEmailId as EmailId,
+        event: sentEvent("provider-newer", "2026-08-27T12:00:00.000Z"),
+      })
+      await t.mutation(internal.notifications.handleEmailEvent, {
+        id: componentEmailId as EmailId,
+        event: event("provider-newer", "2026-08-27T12:01:00.000Z"),
+      })
+
+      expect(await readNotification(t, notificationId)).toMatchObject({
+        status: expectedStatus,
+        latestProviderEventAt: Date.parse("2026-08-27T12:01:00.000Z"),
+      })
+      expect(await readDeliveries(t, notificationId)).toEqual([
+        expect.objectContaining({
+          status: expectedStatus,
+          providerEventAt: Date.parse("2026-08-27T12:01:00.000Z"),
+        }),
+      ])
+    }
+  )
+
   it("keeps transient bounces retryable but permanently suppresses hard bounces", async () => {
     const t = createTest()
     const transientOwner = await createUser(t, "transient@example.com")
@@ -462,6 +550,65 @@ describe("provider event reconciliation", () => {
     expect(suppressed).not.toHaveProperty("activeAttemptNumber")
     expect(await readDeliveries(t, suppressedId)).toEqual([
       expect.objectContaining({ attemptNumber: 1, status: "suppressed" }),
+    ])
+  })
+
+  it("keeps suppression sticky when an older attempt is complained after retry", async () => {
+    const t = createTest()
+    const owner = await createUser(t, "sticky-suppression@example.com")
+    const notificationId = await enqueue(t, {
+      dedupeKey: "sticky-suppression:1",
+      recipient: "sticky-suppression@example.com",
+      ownerId: owner.userId,
+    })
+    const firstComponentId = await enqueueRendered(t, notificationId)
+    await t.mutation(internal.notifications.handleEmailEvent, {
+      id: firstComponentId as EmailId,
+      event: delayedEvent("provider-sticky-first", "2026-08-27T12:00:00.000Z"),
+    })
+    await expect(
+      owner.client.mutation(api.notifications.retryMine, { notificationId })
+    ).resolves.toBe(2)
+    const secondComponentId = await enqueueRendered(t, notificationId, 2)
+
+    await t.mutation(internal.notifications.handleEmailEvent, {
+      id: firstComponentId as EmailId,
+      event: complainedEvent(
+        "provider-sticky-first",
+        "2026-08-27T12:01:00.000Z"
+      ),
+    })
+    await t.mutation(internal.notifications.handleEmailEvent, {
+      id: secondComponentId as EmailId,
+      event: deliveredEvent(
+        "provider-sticky-second",
+        "2026-08-27T12:02:00.000Z"
+      ),
+    })
+
+    expect(await readNotification(t, notificationId)).toMatchObject({
+      status: "complained",
+      latestProviderId: "provider-sticky-first",
+    })
+    expect(
+      (await readDeliveries(t, notificationId)).map(
+        ({ attemptNumber, status }) => ({ attemptNumber, status })
+      )
+    ).toEqual([
+      { attemptNumber: 1, status: "complained" },
+      { attemptNumber: 2, status: "delivered" },
+    ])
+
+    const futureId = await enqueue(t, {
+      dedupeKey: "sticky-suppression:2",
+      recipient: "STICKY-SUPPRESSION@example.com",
+      ownerId: owner.userId,
+    })
+    expect(await readNotification(t, futureId)).toMatchObject({
+      status: "suppressed",
+    })
+    expect(await readDeliveries(t, futureId)).toEqual([
+      expect.objectContaining({ status: "suppressed" }),
     ])
   })
 
@@ -627,7 +774,7 @@ describe("Resend cleanup scheduling", () => {
     )
   })
 
-  it("advances through more than one bounded payload-scrubbing batch", async () => {
+  it("self-schedules more than one bounded payload-scrubbing batch", async () => {
     const t = createTest()
     const expiredAt = Date.now() - 1_000
     await t.run(async (ctx) => {
@@ -656,7 +803,14 @@ describe("Resend cleanup scheduling", () => {
           .collect()
       )
     ).toHaveLength(1)
-    await t.mutation(internal.emailCleanup.scrubExpiredApplicationPayloads, {})
+    expect(
+      (
+        await t.run(async (ctx) =>
+          ctx.db.system.query("_scheduled_functions").collect()
+        )
+      ).map(({ name }) => name)
+    ).toEqual([expect.stringContaining("scrubExpiredApplicationPayloads")])
+    await finishAllScheduledFunctions(t)
     expect(
       await t.run(async (ctx) =>
         ctx.db
@@ -665,5 +819,36 @@ describe("Resend cleanup scheduling", () => {
           .collect()
       )
     ).toHaveLength(0)
+  })
+
+  it("self-schedules more than one bounded pending-suppression batch", async () => {
+    const t = createTest()
+    const staleAt = Date.now() - 29 * 24 * 60 * 60 * 1_000
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 101; index += 1) {
+        await ctx.db.insert("pendingEmailSuppressions", {
+          providerId: `stale-provider-${index}`,
+          eventAt: staleAt,
+          reason: "Test suppression",
+          createdAt: staleAt,
+          updatedAt: staleAt,
+        })
+      }
+    })
+
+    await t.mutation(internal.emailCleanup.cleanPendingSuppressions, {})
+    expect(
+      (
+        await t.run(async (ctx) =>
+          ctx.db.system.query("_scheduled_functions").collect()
+        )
+      ).map(({ name }) => name)
+    ).toEqual([expect.stringContaining("cleanPendingSuppressions")])
+    await finishAllScheduledFunctions(t)
+    expect(
+      await t.run(async (ctx) =>
+        ctx.db.query("pendingEmailSuppressions").collect()
+      )
+    ).toEqual([])
   })
 })

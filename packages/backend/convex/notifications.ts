@@ -337,6 +337,25 @@ const deliveryResult = v.object({
   updatedAt: v.number(),
 })
 
+function publicDeliveryError(status: DeliveryStatus) {
+  switch (status) {
+    case "delayed":
+      return "Delivery is taking longer than expected."
+    case "failed":
+      return "Delivery was not completed. You can try again."
+    case "bounced":
+      return "Delivery was blocked because the email address could not receive messages."
+    case "complained":
+    case "suppressed":
+      return "Delivery is blocked for this email address."
+    case "scheduled":
+    case "queued":
+    case "sent":
+    case "delivered":
+      return undefined
+  }
+}
+
 export const getMine = query({
   args: { notificationId: v.id("notifications") },
   returns: v.union(
@@ -370,7 +389,7 @@ export const getMine = query({
       deliveries: deliveries.map((delivery) => ({
         attemptNumber: delivery.attemptNumber,
         status: delivery.status,
-        error: delivery.error,
+        error: publicDeliveryError(delivery.status),
         createdAt: delivery.createdAt,
         updatedAt: delivery.updatedAt,
       })),
@@ -474,13 +493,13 @@ export function providerUpdate(event: EmailEvent): ProviderUpdate | null {
 const precedence: Record<DeliveryStatus, number> = {
   scheduled: 0,
   queued: 1,
-  delayed: 1,
-  failed: 1,
   sent: 2,
-  delivered: 3,
-  bounced: 4,
-  complained: 5,
-  suppressed: 6,
+  delayed: 3,
+  failed: 4,
+  delivered: 5,
+  bounced: 6,
+  complained: 7,
+  suppressed: 8,
 }
 
 async function applyProviderUpdate(
@@ -514,13 +533,9 @@ async function applyProviderUpdate(
   if (
     !update.permanent &&
     delivery.providerEventAt !== undefined &&
-    eventAt < delivery.providerEventAt
-  ) {
-    return
-  }
-  if (
-    !update.permanent &&
-    precedence[update.status] < precedence[delivery.status]
+    (eventAt < delivery.providerEventAt ||
+      (eventAt === delivery.providerEventAt &&
+        precedence[update.status] <= precedence[delivery.status]))
   ) {
     return
   }
@@ -540,9 +555,11 @@ async function applyProviderUpdate(
         : delivery.failedAt,
     updatedAt: now,
   })
+  const notificationPermanent = suppressedStatuses.has(notification.status)
   if (
     update.permanent ||
-    notification.activeAttemptNumber === delivery.attemptNumber
+    (!notificationPermanent &&
+      notification.activeAttemptNumber === delivery.attemptNumber)
   ) {
     await ctx.db.patch(notification._id, {
       status: update.status,

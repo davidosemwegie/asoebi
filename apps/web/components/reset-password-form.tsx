@@ -34,6 +34,10 @@ const actionClassName = "min-h-12 w-full px-4 text-base"
 const linkClassName =
   "inline-flex min-h-11 items-center justify-center rounded-lg px-3 text-base underline underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
 
+function isInvalidResetToken(error: { code?: string } | null | undefined) {
+  return error?.code === "INVALID_TOKEN" || error?.code === "TOKEN_EXPIRED"
+}
+
 export function ResetPasswordForm({
   token,
   invalidLink,
@@ -84,7 +88,11 @@ export function ResetPasswordForm({
       })
 
       if (result.error) {
-        setTokenInvalid(true)
+        if (isInvalidResetToken(result.error)) {
+          setTokenInvalid(true)
+        } else {
+          setResetFailed(true)
+        }
         return
       }
 

@@ -1,4 +1,4 @@
-import { components } from "./_generated/api"
+import { components, internal } from "./_generated/api"
 import { v } from "convex/values"
 
 import { internalMutation } from "./_generated/server"
@@ -46,6 +46,13 @@ export const scrubExpiredApplicationPayloads = internalMutation({
         updatedAt: Date.now(),
       })
     }
+    if (expired.length === 100) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.emailCleanup.scrubExpiredApplicationPayloads,
+        {}
+      )
+    }
     return null
   },
 })
@@ -60,6 +67,13 @@ export const cleanPendingSuppressions = internalMutation({
       .withIndex("by_createdAt", (q) => q.lt("createdAt", cutoff))
       .take(100)
     for (const event of stale) await ctx.db.delete(event._id)
+    if (stale.length === 100) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.emailCleanup.cleanPendingSuppressions,
+        {}
+      )
+    }
     return null
   },
 })
