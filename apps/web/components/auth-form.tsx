@@ -16,14 +16,13 @@ import {
   FieldLabel,
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
-import { Separator } from "@workspace/ui/components/separator"
 
 type AuthMode = "login" | "signup"
 
 const authCopy = {
   login: {
     title: "Welcome back",
-    description: "Sign in to continue.",
+    description: "Sign in to your Aso Circle workspace.",
     submit: "Sign in",
     pending: "Signing in…",
     alternatePrompt: "New to Aso Circle?",
@@ -90,47 +89,30 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   }
 
   return (
-    <main className="min-h-svh bg-brand-blackberry text-brand-ivory">
-      <div className="grid min-h-svh lg:grid-cols-[minmax(0,0.92fr)_minmax(34rem,1.08fr)]">
+    <main className="min-h-svh bg-[#f5f5f7] text-[#1d1d1f]">
+      <div className="grid min-h-svh lg:grid-cols-[minmax(0,0.95fr)_minmax(34rem,1.05fr)]">
         <section className="flex min-h-svh flex-col px-6 py-7 sm:px-10 sm:py-9 lg:px-12 lg:py-10 xl:px-16">
-          <Link href="/" className="flex w-fit items-center gap-3">
-            <Image
-              src="/aso-circle-icon.png"
-              alt=""
-              width={40}
-              height={40}
-              priority
-              className="size-10 rounded-xl"
-            />
-            <span className="font-display text-xl font-medium tracking-tight">
-              Aso Circle
-            </span>
+          <Link
+            href="/"
+            className="w-fit font-display text-xl font-medium tracking-[-0.02em] text-[#24131e] transition-opacity hover:opacity-70"
+          >
+            <span>Aso Circle</span>
           </Link>
 
-          <div className="flex flex-1 items-center py-12 lg:py-16">
-            <div className="mx-auto w-full max-w-md">
-              <div className="mb-8 flex items-center gap-4">
-                <Separator className="max-w-24 bg-brand-powder/25" />
-                <p className="text-[0.65rem] font-semibold tracking-[0.22em] text-brand-powder uppercase">
-                  Account / Secure
-                </p>
-              </div>
-
-              <h1 className="font-display text-5xl leading-[0.95] font-medium tracking-tight text-balance sm:text-6xl">
+          <div className="flex flex-1 items-center py-14 lg:py-16">
+            <div className="mx-auto w-full max-w-[26rem]">
+              <h1 className="font-display text-[3.25rem] leading-[0.98] font-medium tracking-[-0.035em] text-balance sm:text-[3.75rem]">
                 {copy.title}
               </h1>
-              <p className="mt-5 max-w-sm text-sm leading-6 text-brand-ivory/60">
+              <p className="mt-5 max-w-sm text-[0.9375rem] leading-6 text-[#6e6e73]">
                 {copy.description}
               </p>
 
-              <form onSubmit={handleSubmit} className="mt-10">
+              <form onSubmit={handleSubmit} className="mt-9">
                 <FieldGroup>
                   {mode === "signup" ? (
                     <Field>
-                      <FieldLabel
-                        htmlFor="name"
-                        className="text-brand-ivory/90"
-                      >
+                      <FieldLabel htmlFor="name" className="text-[#1d1d1f]">
                         Name
                       </FieldLabel>
                       <Input
@@ -142,13 +124,13 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                         minLength={2}
                         required
                         disabled={isPending}
-                        className="border-brand-ivory/20 bg-brand-ivory/5 text-brand-ivory placeholder:text-brand-ivory/35 focus-visible:border-brand-powder focus-visible:ring-brand-powder/20"
+                        className="h-11 border-[#d2d2d7] bg-white text-[#1d1d1f] shadow-[0_1px_2px_rgba(0,0,0,0.03)] placeholder:text-[#86868b] focus-visible:border-[#91b3d1] focus-visible:ring-[#91b3d1]/20 dark:border-[#d2d2d7] dark:bg-white dark:text-[#1d1d1f] dark:placeholder:text-[#86868b]"
                       />
                     </Field>
                   ) : null}
 
                   <Field>
-                    <FieldLabel htmlFor="email" className="text-brand-ivory/90">
+                    <FieldLabel htmlFor="email" className="text-[#1d1d1f]">
                       Email
                     </FieldLabel>
                     <Input
@@ -160,15 +142,12 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                       placeholder="you@example.com"
                       required
                       disabled={isPending}
-                      className="border-brand-ivory/20 bg-brand-ivory/5 text-brand-ivory placeholder:text-brand-ivory/35 focus-visible:border-brand-powder focus-visible:ring-brand-powder/20"
+                      className="h-11 border-[#d2d2d7] bg-white text-[#1d1d1f] shadow-[0_1px_2px_rgba(0,0,0,0.03)] placeholder:text-[#86868b] focus-visible:border-[#91b3d1] focus-visible:ring-[#91b3d1]/20 dark:border-[#d2d2d7] dark:bg-white dark:text-[#1d1d1f] dark:placeholder:text-[#86868b]"
                     />
                   </Field>
 
                   <Field>
-                    <FieldLabel
-                      htmlFor="password"
-                      className="text-brand-ivory/90"
-                    >
+                    <FieldLabel htmlFor="password" className="text-[#1d1d1f]">
                       Password
                     </FieldLabel>
                     <Input
@@ -185,12 +164,12 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                       aria-describedby={
                         mode === "signup" ? "password-description" : undefined
                       }
-                      className="border-brand-ivory/20 bg-brand-ivory/5 text-brand-ivory focus-visible:border-brand-powder focus-visible:ring-brand-powder/20"
+                      className="h-11 border-[#d2d2d7] bg-white text-[#1d1d1f] shadow-[0_1px_2px_rgba(0,0,0,0.03)] focus-visible:border-[#91b3d1] focus-visible:ring-[#91b3d1]/20 dark:border-[#d2d2d7] dark:bg-white dark:text-[#1d1d1f]"
                     />
                     {mode === "signup" ? (
                       <FieldDescription
                         id="password-description"
-                        className="text-brand-ivory/50"
+                        className="text-[#6e6e73]"
                       >
                         Use 8 to 128 characters.
                       </FieldDescription>
@@ -204,7 +183,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                   <Field>
                     <Button
                       type="submit"
-                      className="w-full border-brand-ivory bg-brand-ivory text-brand-blackberry hover:bg-brand-ivory/90"
+                      className="h-11 w-full border-[#1d1d1f] bg-[#1d1d1f] text-white shadow-none transition-colors hover:bg-[#333336]"
                       disabled={isPending}
                     >
                       {isPending ? (
@@ -216,11 +195,11 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                       ) : null}
                       {isPending ? copy.pending : copy.submit}
                     </Button>
-                    <FieldDescription className="text-center text-brand-ivory/55">
+                    <FieldDescription className="text-center text-[#6e6e73]">
                       {copy.alternatePrompt}{" "}
                       <Link
                         href={copy.alternateHref}
-                        className="text-brand-ivory underline decoration-brand-powder/50 underline-offset-4 transition-colors hover:text-brand-powder"
+                        className="font-medium text-[#1d1d1f] underline decoration-[#a8a8ad] underline-offset-4 transition-colors hover:text-[#321727]"
                       >
                         {copy.alternateAction}
                       </Link>
@@ -231,14 +210,13 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             </div>
           </div>
 
-          <div className="hidden items-center justify-between text-[0.6rem] tracking-[0.2em] text-brand-ivory/40 uppercase sm:flex">
-            <span>Your people. Your style.</span>
-            <span>Private workspace access</span>
-          </div>
+          <p className="hidden text-xs text-[#86868b] sm:block">
+            Private workspace access
+          </p>
         </section>
 
         <aside className="hidden p-3 pl-0 lg:block">
-          <div className="relative h-full min-h-[calc(100svh-1.5rem)] overflow-hidden rounded-3xl border border-brand-ivory/10">
+          <div className="relative h-full min-h-[calc(100svh-1.5rem)] overflow-hidden rounded-2xl border border-black/5 bg-[#e9e8e4]">
             <Image
               src="/images/aso-oke-editorial.jpg"
               alt="A collection of handwoven Nigerian Aso Oke textiles in Aso Circle's signature colors"
@@ -247,24 +225,14 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
               sizes="(min-width: 1024px) 55vw, 0px"
               className="object-cover"
             />
-            <div
-              className="absolute inset-0 bg-brand-blackberry/30"
-              aria-hidden="true"
-            />
-            <div className="absolute inset-x-0 top-0 flex items-center justify-between p-8 text-[0.65rem] tracking-[0.2em] text-brand-ivory/80 uppercase">
-              <span>Handwoven / 01</span>
-              <span>Aso Oke</span>
-            </div>
-            <div className="absolute right-8 bottom-8 left-8 max-w-xl">
-              <h2 className="max-w-lg font-display text-4xl leading-[1.02] font-medium text-balance text-brand-ivory xl:text-5xl">
-                Tradition, woven into every celebration.
+            <div className="absolute inset-0 bg-black/10" aria-hidden="true" />
+            <div className="absolute right-8 bottom-8 left-8 max-w-md text-white [text-shadow:0_1px_18px_rgba(0,0,0,0.35)]">
+              <p className="text-xs font-medium tracking-[0.16em] uppercase">
+                Nigerian Aso Oke
+              </p>
+              <h2 className="mt-3 font-display text-3xl leading-[1.05] font-medium tracking-[-0.025em] text-balance xl:text-4xl">
+                Woven for celebration.
               </h2>
-              <div className="mt-6 flex items-center gap-4">
-                <Separator className="max-w-10 bg-brand-powder/70" />
-                <p className="max-w-sm text-xs leading-5 text-brand-ivory/70">
-                  Coordinate your circle with clarity, care, and style.
-                </p>
-              </div>
             </div>
           </div>
         </aside>
