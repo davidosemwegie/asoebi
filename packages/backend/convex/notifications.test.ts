@@ -461,6 +461,60 @@ describe("provider event reconciliation", () => {
     ])
   })
 
+  it("backfills a component upgrade after sent while preserving provider metadata", async () => {
+    const t = createTest()
+    const notificationId = await enqueue(t, {
+      dedupeKey: "provider-before-component:1",
+    })
+    const componentEmailId = await enqueueRendered(t, notificationId)
+    const sentAt = "2026-08-27T12:00:00.000Z"
+
+    await t.mutation(internal.notifications.handleEmailEvent, {
+      id: componentEmailId as EmailId,
+      event: sentEvent("provider-before-component", sentAt),
+    })
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId,
+      attemptNumber: 1,
+      componentEmailId,
+      providerId: "provider-before-component",
+      status: "delivered",
+      permanent: false,
+    })
+
+    expect(await readNotification(t, notificationId)).toMatchObject({
+      status: "delivered",
+      latestProviderEventAt: Date.parse(sentAt),
+      latestProviderEventType: "email.sent",
+    })
+    expect(await readDeliveries(t, notificationId)).toEqual([
+      expect.objectContaining({
+        status: "delivered",
+        providerEventAt: Date.parse(sentAt),
+        providerEventType: "email.sent",
+      }),
+    ])
+
+    const deliveredAt = "2026-08-27T12:01:00.000Z"
+    await t.mutation(internal.notifications.handleEmailEvent, {
+      id: componentEmailId as EmailId,
+      event: deliveredEvent("provider-before-component", deliveredAt),
+    })
+
+    expect(await readNotification(t, notificationId)).toMatchObject({
+      status: "delivered",
+      latestProviderEventAt: Date.parse(deliveredAt),
+      latestProviderEventType: "email.delivered",
+    })
+    expect(await readDeliveries(t, notificationId)).toEqual([
+      expect.objectContaining({
+        status: "delivered",
+        providerEventAt: Date.parse(deliveredAt),
+        providerEventType: "email.delivered",
+      }),
+    ])
+  })
+
   it("ignores duplicate and older lower-precedence events", async () => {
     const t = createTest()
     const notificationId = await enqueue(t)

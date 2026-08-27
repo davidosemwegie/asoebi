@@ -520,7 +520,13 @@ async function applyProviderUpdate(
   ) {
     return
   }
-  if (!recordsProviderEvent && delivery.providerEventAt !== undefined) return
+  if (
+    !recordsProviderEvent &&
+    delivery.providerEventAt !== undefined &&
+    precedence[update.status] <= precedence[delivery.status]
+  ) {
+    return
+  }
   const currentPermanent = suppressedStatuses.has(delivery.status)
   if (currentPermanent && !update.permanent) return
   if (
