@@ -3,17 +3,17 @@
 import { useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { LoaderCircleIcon, SparklesIcon } from "lucide-react"
+import { CircleAlertIcon, LoaderCircleIcon } from "lucide-react"
 
+import { AuthShell } from "@/components/auth-shell"
 import { authClient } from "@/lib/auth-client"
-import { Button } from "@workspace/ui/components/button"
+import { getAuthHref, getSafeAuthContinuation } from "@/lib/auth-continuation"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@workspace/ui/components/card"
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@workspace/ui/components/alert"
+import { Button } from "@workspace/ui/components/button"
 import {
   Field,
   FieldDescription,
@@ -24,6 +24,13 @@ import {
 import { Input } from "@workspace/ui/components/input"
 
 type AuthMode = "login" | "signup"
+type AuthField = "name" | "email" | "password"
+type AuthFieldErrors = Partial<Record<AuthField, string>>
+
+const controlClassName = "min-h-12 text-base"
+const actionClassName = "min-h-12 w-full px-4 text-base"
+const secondaryActionClassName =
+  "inline-flex min-h-11 items-center justify-center rounded-lg px-2 text-base underline underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
 
 const authCopy = {
   login: {
@@ -46,28 +53,84 @@ const authCopy = {
   },
 } as const
 
-export function AuthForm({ mode }: { mode: AuthMode }) {
+function getVerificationResultHref(
+  result: "sent" | "verified",
+  continuation: string
+) {
+  const searchParams = new URLSearchParams({ [result]: "1" })
+  const safeContinuation = getSafeAuthContinuation(continuation)
+
+  if (safeContinuation !== "/") {
+    searchParams.set("next", safeContinuation)
+  }
+
+  return `/verify-email?${searchParams.toString()}`
+}
+
+function validateAuthFields(mode: AuthMode, formData: FormData) {
+  const errors: AuthFieldErrors = {}
+  const name = String(formData.get("name") ?? "").trim()
+  const email = String(formData.get("email") ?? "").trim()
+  const password = String(formData.get("password") ?? "")
+
+  if (mode === "signup" && name.length < 2) {
+    errors.name = "Enter your name using at least 2 characters."
+  }
+
+  if (!email) {
+    errors.email = "Enter your email address."
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = "Enter a valid email address."
+  }
+
+  if (password.length < 8 || password.length > 128) {
+    errors.password = "Use 8 to 128 characters."
+  }
+
+  return { errors, name, email, password }
+}
+
+export function AuthForm({
+  mode,
+  continuation = "/",
+}: {
+  mode: AuthMode
+  continuation?: string
+}) {
   const router = useRouter()
   const copy = authCopy[mode]
+  const safeContinuation = getSafeAuthContinuation(continuation)
   const [isPending, setIsPending] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({})
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setIsPending(true)
     setErrorMessage(null)
 
-    const formData = new FormData(event.currentTarget)
-    const email = String(formData.get("email") ?? "").trim()
-    const password = String(formData.get("password") ?? "")
+    const { errors, name, email, password } = validateAuthFields(
+      mode,
+      new FormData(event.currentTarget)
+    )
+    setFieldErrors(errors)
+
+    if (Object.keys(errors).length > 0) {
+      return
+    }
+
+    setIsPending(true)
 
     try {
       const result =
         mode === "signup"
           ? await authClient.signUp.email({
-              name: String(formData.get("name") ?? "").trim(),
+              name,
               email,
               password,
+              callbackURL: getVerificationResultHref(
+                "verified",
+                safeContinuation
+              ),
             })
           : await authClient.signIn.email({
               email,
@@ -77,15 +140,18 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
       if (result.error) {
         setErrorMessage(
-          result.error.message ??
-            (mode === "login"
-              ? "Email or password is incorrect."
-              : "Could not create your account.")
+          mode === "login"
+            ? "Email or password is incorrect."
+            : "We couldn't create your account. Check your details or sign in if you already have an account."
         )
         return
       }
 
-      router.replace("/")
+      router.replace(
+        mode === "signup"
+          ? getVerificationResultHref("sent", safeContinuation)
+          : safeContinuation
+      )
       router.refresh()
     } catch {
       setErrorMessage("Something went wrong. Please try again.")
@@ -95,109 +161,135 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-muted/30 p-4">
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <Link
-          href="/"
-          className="mx-auto flex items-center gap-2 text-sm font-semibold"
-        >
-          <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <SparklesIcon aria-hidden="true" />
-          </span>
-          Asoebi
-        </Link>
+    <AuthShell title={copy.title} description={copy.description}>
+      <form
+        onSubmit={handleSubmit}
+        noValidate
+        aria-busy={isPending}
+        className="space-y-5"
+      >
+        <FieldGroup>
+          {mode === "signup" ? (
+            <Field data-invalid={Boolean(fieldErrors.name)}>
+              <FieldLabel htmlFor="name" className="text-base">
+                Name
+              </FieldLabel>
+              <Input
+                id="name"
+                name="name"
+                type="text"
+                autoComplete="name"
+                className={controlClassName}
+                minLength={2}
+                required
+                disabled={isPending}
+                aria-invalid={Boolean(fieldErrors.name)}
+                aria-describedby={fieldErrors.name ? "name-error" : undefined}
+              />
+              <FieldError id="name-error">{fieldErrors.name}</FieldError>
+            </Field>
+          ) : null}
 
-        <Card>
-          <CardHeader className="text-center">
-            <CardTitle>
-              <h1>{copy.title}</h1>
-            </CardTitle>
-            <CardDescription>{copy.description}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit}>
-              <FieldGroup>
-                {mode === "signup" ? (
-                  <Field>
-                    <FieldLabel htmlFor="name">Name</FieldLabel>
-                    <Input
-                      id="name"
-                      name="name"
-                      type="text"
-                      autoComplete="name"
-                      placeholder="Your name"
-                      minLength={2}
-                      required
-                      disabled={isPending}
-                    />
-                  </Field>
-                ) : null}
+          <Field data-invalid={Boolean(fieldErrors.email)}>
+            <FieldLabel htmlFor="email" className="text-base">
+              Email
+            </FieldLabel>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              className={controlClassName}
+              required
+              disabled={isPending}
+              aria-invalid={Boolean(fieldErrors.email)}
+              aria-describedby={fieldErrors.email ? "email-error" : undefined}
+            />
+            <FieldError id="email-error">{fieldErrors.email}</FieldError>
+          </Field>
 
-                <Field>
-                  <FieldLabel htmlFor="email">Email</FieldLabel>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    required
-                    disabled={isPending}
-                  />
-                </Field>
+          <Field data-invalid={Boolean(fieldErrors.password)}>
+            <div className="flex min-h-11 items-center justify-between gap-3">
+              <FieldLabel htmlFor="password" className="text-base">
+                Password
+              </FieldLabel>
+              {mode === "login" ? (
+                <Link
+                  href={getAuthHref("/forgot-password", safeContinuation)}
+                  className={secondaryActionClassName}
+                >
+                  Forgot password?
+                </Link>
+              ) : null}
+            </div>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete={
+                mode === "signup" ? "new-password" : "current-password"
+              }
+              className={controlClassName}
+              minLength={8}
+              maxLength={128}
+              required
+              disabled={isPending}
+              aria-invalid={Boolean(fieldErrors.password)}
+              aria-describedby={
+                [
+                  mode === "signup" ? "password-description" : null,
+                  fieldErrors.password ? "password-error" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
+            />
+            {mode === "signup" ? (
+              <FieldDescription id="password-description" className="text-base">
+                Use 8 to 128 characters.
+              </FieldDescription>
+            ) : null}
+            <FieldError id="password-error">{fieldErrors.password}</FieldError>
+          </Field>
 
-                <Field>
-                  <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <Input
-                    id="password"
-                    name="password"
-                    type="password"
-                    autoComplete={
-                      mode === "signup" ? "new-password" : "current-password"
-                    }
-                    minLength={8}
-                    maxLength={128}
-                    required
-                    disabled={isPending}
-                    aria-describedby={
-                      mode === "signup" ? "password-description" : undefined
-                    }
-                  />
-                  {mode === "signup" ? (
-                    <FieldDescription id="password-description">
-                      Use 8 to 128 characters.
-                    </FieldDescription>
-                  ) : null}
-                </Field>
+          {errorMessage ? (
+            <Alert variant="destructive" aria-live="polite">
+              <CircleAlertIcon aria-hidden="true" />
+              <AlertTitle>
+                {mode === "login" ? "Sign-in failed" : "Account not created"}
+              </AlertTitle>
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          ) : null}
 
-                {errorMessage ? (
-                  <FieldError aria-live="polite">{errorMessage}</FieldError>
-                ) : null}
-
-                <Field>
-                  <Button type="submit" className="w-full" disabled={isPending}>
-                    {isPending ? (
-                      <LoaderCircleIcon
-                        data-icon="inline-start"
-                        className="animate-spin"
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                    {isPending ? copy.pending : copy.submit}
-                  </Button>
-                  <FieldDescription className="text-center">
-                    {copy.alternatePrompt}{" "}
-                    <Link href={copy.alternateHref}>
-                      {copy.alternateAction}
-                    </Link>
-                  </FieldDescription>
-                </Field>
-              </FieldGroup>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    </main>
+          <Field>
+            <Button
+              type="submit"
+              className={actionClassName}
+              disabled={isPending}
+            >
+              {isPending ? (
+                <LoaderCircleIcon
+                  data-icon="inline-start"
+                  className="animate-spin"
+                  aria-hidden="true"
+                />
+              ) : null}
+              {isPending ? copy.pending : copy.submit}
+            </Button>
+            <FieldDescription className="text-center text-base">
+              {copy.alternatePrompt}{" "}
+              <Link
+                href={getAuthHref(copy.alternateHref, safeContinuation)}
+                className={secondaryActionClassName}
+              >
+                {copy.alternateAction}
+              </Link>
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
+      </form>
+    </AuthShell>
   )
 }
