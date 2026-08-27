@@ -1,4 +1,4 @@
-# Asoebi MVP Product Requirements Document
+# Aso Circle MVP Product Requirements Document
 
 ## Document status
 
@@ -10,7 +10,7 @@
 
 ## Summary
 
-Asoebi is a private, event-specific ordering and coordination product for aso ebi. It gives an organizer one place to publish the items available for an event, collect guest selections and fulfillment details, review proof of off-platform payment, and coordinate each order through fulfillment.
+Aso Circle is a private, event-specific ordering and coordination product for aso ebi. It gives an organizer one place to publish the items available for an event, collect guest selections and fulfillment details, review proof of off-platform payment, and coordinate each order through fulfillment.
 
 The MVP replaces fragmented WhatsApp conversations and operational spreadsheets with a guest ordering experience and an organizer dashboard. It does not process money, operate a marketplace, or provide dispatch services.
 
@@ -121,7 +121,7 @@ Guests access an event through its private link and must have an account before 
 - **FR-FULFILL-3:** Pickup options can require a pickup contact, location, and instructions.
 - **FR-FULFILL-4:** Delivery options can require recipient name, phone number, address, delivery availability, and notes.
 - **FR-FULFILL-5:** A fulfillment fee is added once per order and uses the event currency.
-- **FR-FULFILL-6:** Capturing a delivery choice does not imply that Asoebi books, performs, or guarantees delivery.
+- **FR-FULFILL-6:** Capturing a delivery choice does not imply that Aso Circle books, performs, or guarantees delivery.
 
 ### Guest ordering
 
@@ -221,7 +221,7 @@ Guests access an event through its private link and must have an account before 
 
 ## Success criteria and launch gate
 
-The MVP is validated when one real event completes the following lifecycle with Asoebi as the operational source of truth:
+The MVP is validated when one real event completes the following lifecycle with Aso Circle as the operational source of truth:
 
 1. The organizer independently creates and publishes the event.
 2. Real guests submit receipt-backed orders through private links.

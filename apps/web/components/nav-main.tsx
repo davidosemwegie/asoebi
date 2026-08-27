@@ -25,8 +25,8 @@ export function NavMain({
 
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-      <SidebarMenu>
+      <SidebarGroupLabel className="mb-1">Workspace</SidebarGroupLabel>
+      <SidebarMenu className="gap-1">
         {items.map((item) => {
           const isActive =
             item.url === "/"
@@ -40,7 +40,7 @@ export function NavMain({
                 render={<Link href={item.url} />}
                 isActive={isActive}
                 tooltip={item.title}
-                className="relative before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent data-active:text-brand-plum data-active:before:bg-brand-plum dark:data-active:text-brand-powder dark:data-active:before:bg-brand-powder data-active:[&_svg]:text-brand-plum dark:data-active:[&_svg]:text-brand-powder"
+                className="relative before:absolute before:inset-y-2 before:left-1 before:w-0.5 before:rounded-full before:bg-transparent data-active:text-brand-aubergine data-active:before:bg-brand-aubergine dark:data-active:text-brand-powder dark:data-active:before:bg-brand-powder data-active:[&_svg]:text-brand-aubergine dark:data-active:[&_svg]:text-brand-powder"
               >
                 <Icon aria-hidden="true" />
                 <span>{item.title}</span>

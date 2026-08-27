@@ -30,14 +30,15 @@ export function EventsOverview({ createOpen }: { createOpen: boolean }) {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-heading text-3xl font-semibold text-balance">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 py-8 md:py-12">
+      <div className="flex items-end justify-between gap-6 border-b border-border/80 pb-7">
+        <div className="max-w-2xl">
+          <h1 className="font-display text-4xl leading-none font-medium tracking-tight text-balance sm:text-5xl">
             Events
           </h1>
-          <p className="mt-1 text-pretty text-muted-foreground">
-            Create and manage your celebrations.
+          <p className="mt-3 max-w-xl text-pretty text-muted-foreground">
+            Plan every detail, gather your people, and make each event feel
+            effortless.
           </p>
         </div>
         <Button

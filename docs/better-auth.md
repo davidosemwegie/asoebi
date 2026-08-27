@@ -46,7 +46,7 @@ Primary references:
 5. Add `packages/backend/convex/auth.ts` with the component adapter, Convex
    plugin, email/password enabled, and a validated current-user query.
 6. Allow localhost, David's exact Tailscale development host, the production
-   aliases, and only Asoebi's ClearJar Vercel preview host pattern in Better
+   aliases, and only Aso Circle's ClearJar Vercel preview host pattern in Better
    Auth's dynamic base URL configuration.
 7. Register Better Auth HTTP actions in `packages/backend/convex/http.ts`.
 8. Run `pnpm --filter @workspace/backend exec convex dev --once` to mount the

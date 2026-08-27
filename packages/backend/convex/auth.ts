@@ -12,7 +12,7 @@ export const authComponent = createClient<DataModel>(components.betterAuth)
 
 export const createAuth = (ctx: GenericCtx<DataModel>) =>
   betterAuth({
-    appName: "Asoebi",
+    appName: "Aso Circle",
     baseURL: {
       allowedHosts: [
         "localhost:3000",

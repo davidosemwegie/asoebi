@@ -46,17 +46,16 @@ export function AppSidebar({
 
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader>
+      <SidebarHeader className="pt-5 pb-3">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link href="/" />}>
               <span className="flex size-8 items-center justify-center rounded-lg bg-brand-plum text-brand-powder">
                 <SparklesIcon aria-hidden="true" />
               </span>
-              <span className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                <span className="truncate font-semibold">Asoebi</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  Celebration workspace
+              <span className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
+                <span className="truncate font-display text-lg font-medium tracking-tight">
+                  Aso Circle
                 </span>
               </span>
             </SidebarMenuButton>
@@ -66,7 +65,7 @@ export function AppSidebar({
       <SidebarContent>
         <NavMain items={data.navMain} />
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="border-t border-sidebar-border/70 pt-3">
         {user ? (
           <NavUser user={user} />
         ) : (

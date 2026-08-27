@@ -287,7 +287,7 @@ export function EventCatalog() {
           <div className="space-y-1">
             <h2
               id="catalog-heading"
-              className="font-heading text-xl font-medium text-balance"
+              className="font-display text-2xl font-medium tracking-tight text-balance"
             >
               Product catalog
             </h2>

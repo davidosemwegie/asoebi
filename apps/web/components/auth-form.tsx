@@ -28,16 +28,16 @@ type AuthMode = "login" | "signup"
 const authCopy = {
   login: {
     title: "Welcome back",
-    description: "Sign in to continue to your celebration workspace.",
+    description: "Sign in to continue.",
     submit: "Sign in",
     pending: "Signing in…",
-    alternatePrompt: "New to Asoebi?",
+    alternatePrompt: "New to Aso Circle?",
     alternateAction: "Create an account",
     alternateHref: "/signup",
   },
   signup: {
     title: "Create your account",
-    description: "Start planning celebrations with your people in one place.",
+    description: "Start planning events with your people in one place.",
     submit: "Create account",
     pending: "Creating account…",
     alternatePrompt: "Already have an account?",
@@ -95,24 +95,25 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-muted/30 p-4">
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <Link
-          href="/"
-          className="mx-auto flex items-center gap-2 text-sm font-semibold"
-        >
+    <main className="flex min-h-svh items-center justify-center bg-background p-5">
+      <div className="flex w-full max-w-md flex-col gap-7">
+        <Link href="/" className="mx-auto flex items-center gap-2.5">
           <span className="flex size-8 items-center justify-center rounded-lg bg-brand-plum text-brand-powder">
             <SparklesIcon aria-hidden="true" />
           </span>
-          Asoebi
+          <span className="font-display text-xl font-medium tracking-tight">
+            Aso Circle
+          </span>
         </Link>
 
-        <Card>
-          <CardHeader className="text-center">
-            <CardTitle>
+        <Card className="border-border/80 bg-card/70 px-2 py-2 shadow-[0_24px_70px_-50px_rgba(50,23,39,0.55)] ring-0 sm:px-4 sm:py-4 dark:shadow-black/20">
+          <CardHeader className="pb-2 text-center">
+            <CardTitle className="font-display text-3xl font-medium tracking-tight">
               <h1>{copy.title}</h1>
             </CardTitle>
-            <CardDescription>{copy.description}</CardDescription>
+            <CardDescription className="mx-auto max-w-xs leading-relaxed">
+              {copy.description}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit}>
