@@ -4,7 +4,7 @@ import { useMemo, useRef, useState, type FormEvent } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import type { FunctionReturnType } from "convex/server"
-import { useMutation } from "convex/react"
+import { useAction, useMutation } from "convex/react"
 import {
   ArchiveIcon,
   CheckCircle2Icon,
@@ -119,7 +119,7 @@ function FeedbackAlert({
 function EventCover() {
   const event = useEventWorkspace()
   const generateUpload = useMutation(api.eventSetup.generateCoverUploadUrl)
-  const setCover = useMutation(api.eventSetup.setCover)
+  const setCover = useAction(api.eventSetup.setCover)
   const removeCover = useMutation(api.eventSetup.removeCover)
   const inputRef = useRef<HTMLInputElement>(null)
   const removeCancelRef = useRef<HTMLButtonElement>(null)

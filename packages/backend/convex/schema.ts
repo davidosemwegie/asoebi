@@ -61,6 +61,7 @@ export const itemFields = v.object({
 export default defineSchema({
   events: defineTable(eventFields.fields)
     .index("by_ownerId", ["ownerId"])
+    .index("by_ownerId_and_status", ["ownerId", "status"])
     .index("by_shareToken", ["shareToken"]),
   items: defineTable(itemFields.fields)
     .index("by_eventId_and_sortOrder", ["eventId", "sortOrder"])

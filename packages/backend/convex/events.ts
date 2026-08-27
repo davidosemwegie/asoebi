@@ -18,6 +18,7 @@ import type { Doc, Id } from "./_generated/dataModel"
 import { mutation, query } from "./_generated/server"
 
 const MAX_EVENTS_PER_OWNER = 200
+const ACTIVE_EVENT_STATUSES = ["draft", "published", "closed"] as const
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 
 const readinessCode = v.union(
@@ -422,11 +423,21 @@ export const listMine = query({
   returns: v.array(eventResult),
   handler: async (ctx) => {
     const ownerId = await getOwnerId(ctx)
-    const events = await ctx.db
-      .query("events")
-      .withIndex("by_ownerId", (q) => q.eq("ownerId", ownerId))
-      .order("desc")
-      .take(MAX_EVENTS_PER_OWNER)
-    return events.map(toEventResult)
+    const eventsByStatus = await Promise.all(
+      ACTIVE_EVENT_STATUSES.map((status) =>
+        ctx.db
+          .query("events")
+          .withIndex("by_ownerId_and_status", (q) =>
+            q.eq("ownerId", ownerId).eq("status", status)
+          )
+          .order("desc")
+          .take(MAX_EVENTS_PER_OWNER)
+      )
+    )
+    return eventsByStatus
+      .flat()
+      .sort((left, right) => right._creationTime - left._creationTime)
+      .slice(0, MAX_EVENTS_PER_OWNER)
+      .map(toEventResult)
   },
 })

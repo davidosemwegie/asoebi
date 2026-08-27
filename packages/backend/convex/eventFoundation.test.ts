@@ -43,6 +43,25 @@ const pickupOption = {
   requiredFields: { kind: "pickup" as const, pickupContact: true },
 }
 
+const validJpegBytes = Uint8Array.from([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02, 0xff, 0xd9,
+])
+const validPngBytes = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
+  0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+  0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+])
+const validWebpBytes = (() => {
+  const bytes = new Uint8Array(30)
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0)
+  new DataView(bytes.buffer).setUint32(4, bytes.length - 8, true)
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8)
+  bytes.set([0x56, 0x50, 0x38, 0x58], 12)
+  new DataView(bytes.buffer).setUint32(16, bytes.length - 20, true)
+  return bytes
+})()
+
 function createTest() {
   const t = convexTest(schema, modules)
   betterAuthTest.register(t)
@@ -103,7 +122,7 @@ async function makeReady(client: TestClient, eventId: Id<"events">) {
 
 async function storeTestFile(
   t: TestHarness,
-  contents: string,
+  contents: BlobPart,
   contentType: string
 ) {
   const storageId = await t.run(async (ctx) =>
@@ -121,7 +140,7 @@ async function storeTestFile(
   return storageId
 }
 
-async function coverClaimInput(contents: string, contentType: string) {
+async function coverClaimInput(contents: BlobPart, contentType: string) {
   const blob = new Blob([contents], { type: contentType })
   const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())
   return {
@@ -370,6 +389,32 @@ describe("event foundation", () => {
     ).rejects.toThrow("read-only")
   })
 
+  it("lists draft, published, and closed events but excludes archived events", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const draftId = await createEvent(client)
+    const publishedId = await createEvent(client)
+    const closedId = await createEvent(client)
+    const archivedId = await createEvent(client)
+
+    for (const eventId of [publishedId, closedId, archivedId]) {
+      await makeReady(client, eventId)
+      await client.mutation(api.events.publish, { eventId })
+    }
+    await client.mutation(api.events.close, { eventId: closedId })
+    await client.mutation(api.events.archive, { eventId: archivedId })
+
+    const events = await client.query(api.events.listMine, {})
+    expect(events.map((event) => event._id)).toEqual(
+      expect.arrayContaining([draftId, publishedId, closedId])
+    )
+    expect(events.map((event) => event._id)).not.toContain(archivedId)
+    expect(events.map((event) => event.status)).toEqual(
+      expect.arrayContaining(["draft", "published", "closed"])
+    )
+    expect(events).toHaveLength(3)
+  })
+
   it("keeps payment and fulfillment configuration event-scoped and bounded", async () => {
     const t = createTest()
     const { client: owner } = await createUser(t, "owner@example.com")
@@ -435,7 +480,7 @@ describe("event foundation", () => {
       { eventId, ...(await coverClaimInput("unrelated", "image/png")) }
     )
     await expect(
-      owner.mutation(api.eventSetup.setCover, {
+      owner.action(api.eventSetup.setCover, {
         eventId,
         claimId: unrelatedClaim.claimId,
         storageId: preexistingStorageId,
@@ -449,22 +494,31 @@ describe("event foundation", () => {
 
     const firstClaim = await owner.mutation(
       api.eventSetup.generateCoverUploadUrl,
-      { eventId, ...(await coverClaimInput("first", "image/png")) }
+      { eventId, ...(await coverClaimInput(validPngBytes, "image/png")) }
     )
-    const firstStorageId = await storeTestFile(t, "first", "image/png")
+    const firstStorageId = await storeTestFile(t, validPngBytes, "image/png")
     const secondClaim = await owner.mutation(
       api.eventSetup.generateCoverUploadUrl,
-      { eventId, ...(await coverClaimInput("second", "image/webp")) }
+      { eventId, ...(await coverClaimInput(validWebpBytes, "image/webp")) }
     )
-    const secondStorageId = await storeTestFile(t, "second", "image/webp")
+    const secondStorageId = await storeTestFile(t, validWebpBytes, "image/webp")
     const invalidClaim = await owner.mutation(
       api.eventSetup.generateCoverUploadUrl,
       { eventId, ...(await coverClaimInput("not an image", "image/png")) }
     )
-    const invalidStorageId = await storeTestFile(
+    const invalidStorageId = await storeTestFile(t, "not an image", "image/png")
+    const truncatedPngBytes = validPngBytes.slice(0, 33)
+    const truncatedClaim = await owner.mutation(
+      api.eventSetup.generateCoverUploadUrl,
+      {
+        eventId,
+        ...(await coverClaimInput(truncatedPngBytes, "image/png")),
+      }
+    )
+    const truncatedStorageId = await storeTestFile(
       t,
-      "not an image",
-      "text/plain"
+      truncatedPngBytes,
+      "image/png"
     )
     await expect(
       owner.mutation(api.eventSetup.generateCoverUploadUrl, {
@@ -476,28 +530,42 @@ describe("event foundation", () => {
     ).rejects.toThrow("no larger than 10 MB")
 
     await expect(
-      stranger.mutation(api.eventSetup.setCover, {
+      stranger.action(api.eventSetup.setCover, {
         eventId,
         claimId: firstClaim.claimId,
         storageId: firstStorageId,
       })
     ).rejects.toThrow("Event not found")
     await expect(
-      owner.mutation(api.eventSetup.setCover, {
+      owner.action(api.eventSetup.setCover, {
         eventId,
         claimId: invalidClaim.claimId,
         storageId: invalidStorageId,
       })
+    ).resolves.toEqual({
+      ok: false,
+      message:
+        "The uploaded file does not contain a valid JPEG, PNG, or WebP image.",
+    })
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(eventId))?.coverStorageId).toBeUndefined()
+    })
+    await expect(
+      owner.action(api.eventSetup.setCover, {
+        eventId,
+        claimId: truncatedClaim.claimId,
+        storageId: truncatedStorageId,
+      })
     ).resolves.toEqual(expect.objectContaining({ ok: false }))
     await expect(
-      owner.mutation(api.eventSetup.setCover, {
+      owner.action(api.eventSetup.setCover, {
         eventId,
         claimId: firstClaim.claimId,
         storageId: firstStorageId,
       })
     ).resolves.toEqual({ ok: true })
     await expect(
-      owner.mutation(api.eventSetup.setCover, {
+      owner.action(api.eventSetup.setCover, {
         eventId,
         claimId: secondClaim.claimId,
         storageId: secondStorageId,
@@ -512,9 +580,25 @@ describe("event foundation", () => {
         await ctx.db.system.get("_storage", secondStorageId)
       ).not.toBeNull()
     })
-    await owner.mutation(api.eventSetup.removeCover, { eventId })
+    const jpegClaim = await owner.mutation(
+      api.eventSetup.generateCoverUploadUrl,
+      { eventId, ...(await coverClaimInput(validJpegBytes, "image/jpeg")) }
+    )
+    const jpegStorageId = await storeTestFile(t, validJpegBytes, "image/jpeg")
+    await expect(
+      owner.action(api.eventSetup.setCover, {
+        eventId,
+        claimId: jpegClaim.claimId,
+        storageId: jpegStorageId,
+      })
+    ).resolves.toEqual({ ok: true })
     await t.run(async (ctx) => {
       expect(await ctx.db.system.get("_storage", secondStorageId)).toBeNull()
+      expect(await ctx.db.system.get("_storage", jpegStorageId)).not.toBeNull()
+    })
+    await owner.mutation(api.eventSetup.removeCover, { eventId })
+    await t.run(async (ctx) => {
+      expect(await ctx.db.system.get("_storage", jpegStorageId)).toBeNull()
     })
   })
 
@@ -525,14 +609,16 @@ describe("event foundation", () => {
     await makeReady(client, eventId)
     const claim = await client.mutation(api.eventSetup.generateCoverUploadUrl, {
       eventId,
-      ...(await coverClaimInput("cover", "image/jpeg")),
+      ...(await coverClaimInput(validJpegBytes, "image/jpeg")),
     })
-    const storageId = await storeTestFile(t, "cover", "image/jpeg")
-    await client.mutation(api.eventSetup.setCover, {
-      eventId,
-      claimId: claim.claimId,
-      storageId,
-    })
+    const storageId = await storeTestFile(t, validJpegBytes, "image/jpeg")
+    await expect(
+      client.action(api.eventSetup.setCover, {
+        eventId,
+        claimId: claim.claimId,
+        storageId,
+      })
+    ).resolves.toEqual({ ok: true })
     await client.mutation(api.events.remove, { eventId })
     await t.run(async (ctx) => {
       expect(await ctx.db.get(eventId)).toBeNull()

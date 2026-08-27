@@ -5,17 +5,26 @@ import {
   MAX_FULFILLMENT_OPTIONS,
   MAX_PAYMENT_INSTRUCTIONS_LENGTH,
   SUPPORTED_COVER_TYPES,
+  type EventContext,
   getOwnerId,
   requireEditableEvent,
 } from "./eventModel"
 import { fulfillmentRequiredFields, fulfillmentType } from "./schema"
-import { mutation } from "./_generated/server"
+import { internal } from "./_generated/api"
+import type { Id } from "./_generated/dataModel"
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+} from "./_generated/server"
 
 const MAX_OPTION_NAME_LENGTH = 80
 const MAX_OPTION_INSTRUCTIONS_LENGTH = 1_000
 const MAX_FEE_MINOR = 999_999_999_999
 const COVER_UPLOAD_CLAIM_TTL_MS = 15 * 60 * 1_000
 const MAX_ACTIVE_COVER_UPLOAD_CLAIMS = 5
+const COVER_HEADER_BYTES = 33
 
 const pickupRequiredFields = v.object({
   kind: v.literal("pickup"),
@@ -259,59 +268,204 @@ const coverResult = v.union(
   v.object({ ok: v.literal(false), message: v.string() })
 )
 
-export const setCover = mutation({
-  args: {
-    eventId: v.id("events"),
-    claimId: v.id("coverUploadClaims"),
-    storageId: v.id("_storage"),
+const coverArgs = {
+  eventId: v.id("events"),
+  claimId: v.id("coverUploadClaims"),
+  storageId: v.id("_storage"),
+}
+
+type CoverArgs = {
+  eventId: Id<"events">
+  claimId: Id<"coverUploadClaims">
+  storageId: Id<"_storage">
+}
+
+type CoverResult =
+  | { ok: true }
+  | {
+      ok: false
+      message: string
+    }
+
+const coverInspectionResult = v.union(
+  v.object({ ok: v.literal(true), contentType: v.string() }),
+  v.object({ ok: v.literal(false), message: v.string() })
+)
+
+type CoverInspectionResult =
+  | { ok: true; contentType: string }
+  | { ok: false; message: string }
+
+function matchesBytes(
+  bytes: Uint8Array,
+  offset: number,
+  expected: readonly number[]
+) {
+  return expected.every((value, index) => bytes[offset + index] === value)
+}
+
+async function hasValidCoverSignature(storedFile: Blob, contentType: string) {
+  const bytes = new Uint8Array(
+    await storedFile.slice(0, COVER_HEADER_BYTES).arrayBuffer()
+  )
+
+  if (contentType === "image/jpeg") {
+    const ending = new Uint8Array(await storedFile.slice(-2).arrayBuffer())
+    return (
+      storedFile.size >= 6 &&
+      matchesBytes(bytes, 0, [0xff, 0xd8, 0xff]) &&
+      bytes[3] !== 0x00 &&
+      bytes[3] !== 0xff &&
+      matchesBytes(ending, 0, [0xff, 0xd9])
+    )
+  }
+
+  if (contentType === "image/png") {
+    const ending = new Uint8Array(await storedFile.slice(-12).arrayBuffer())
+    return (
+      storedFile.size >= 45 &&
+      matchesBytes(
+        bytes,
+        0,
+        [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+      ) &&
+      matchesBytes(bytes, 8, [0x00, 0x00, 0x00, 0x0d]) &&
+      matchesBytes(bytes, 12, [0x49, 0x48, 0x44, 0x52]) &&
+      matchesBytes(
+        ending,
+        0,
+        [0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]
+      )
+    )
+  }
+
+  if (contentType === "image/webp") {
+    if (
+      storedFile.size < 20 ||
+      !matchesBytes(bytes, 0, [0x52, 0x49, 0x46, 0x46]) ||
+      !matchesBytes(bytes, 8, [0x57, 0x45, 0x42, 0x50]) ||
+      !["VP8 ", "VP8L", "VP8X"].includes(
+        String.fromCharCode(...bytes.slice(12, 16))
+      )
+    ) {
+      return false
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const riffSize = view.getUint32(4, true)
+    const firstChunkSize = view.getUint32(16, true)
+    return (
+      riffSize + 8 === storedFile.size && firstChunkSize <= storedFile.size - 20
+    )
+  }
+
+  return false
+}
+
+async function inspectCoverCandidate(
+  ctx: EventContext,
+  args: CoverArgs,
+  now: number
+) {
+  const { eventId, claimId, storageId } = args
+  const event = await requireEditableEvent(ctx, eventId)
+  const ownerId = await getOwnerId(ctx)
+  const claim = await ctx.db.get(claimId)
+  if (
+    !claim ||
+    claim.eventId !== eventId ||
+    claim.ownerId !== ownerId ||
+    claim.expiresAt < now
+  ) {
+    throw new ConvexError("This cover upload is not valid. Start again.")
+  }
+  const metadata = await ctx.db.system.get("_storage", storageId)
+  if (
+    !metadata ||
+    metadata._creationTime <= claim._creationTime ||
+    metadata._creationTime > claim.expiresAt ||
+    metadata.sha256 !== claim.sha256 ||
+    metadata.size !== claim.size
+  ) {
+    return {
+      ok: false as const,
+      message: "The uploaded cover was not found.",
+    }
+  }
+  if (
+    metadata.contentType !== claim.contentType ||
+    !SUPPORTED_COVER_TYPES.has(metadata.contentType)
+  ) {
+    return {
+      ok: false as const,
+      message: "Use a JPEG, PNG, or WebP image no larger than 10 MB.",
+    }
+  }
+
+  return { ok: true as const, contentType: metadata.contentType, event }
+}
+
+export const inspectCoverUpload = internalQuery({
+  args: { ...coverArgs, now: v.number() },
+  returns: coverInspectionResult,
+  handler: async (ctx, { now, ...args }) => {
+    const candidate = await inspectCoverCandidate(ctx, args, now)
+    if (!candidate.ok) return candidate
+    return { ok: true as const, contentType: candidate.contentType }
   },
+})
+
+export const finalizeCoverUpload = internalMutation({
+  args: { ...coverArgs, signatureValid: v.boolean() },
   returns: coverResult,
-  handler: async (ctx, { eventId, claimId, storageId }) => {
-    const event = await requireEditableEvent(ctx, eventId)
-    const ownerId = await getOwnerId(ctx)
-    const claim = await ctx.db.get(claimId)
-    if (
-      !claim ||
-      claim.eventId !== eventId ||
-      claim.ownerId !== ownerId ||
-      claim.expiresAt < Date.now()
-    ) {
-      throw new ConvexError("This cover upload is not valid. Start again.")
+  handler: async (ctx, { signatureValid, ...args }) => {
+    const candidate = await inspectCoverCandidate(ctx, args, Date.now())
+    if (!candidate.ok) {
+      await ctx.db.delete(args.claimId)
+      return candidate
     }
-    const metadata = await ctx.db.system.get("_storage", storageId)
-    if (
-      !metadata ||
-      metadata._creationTime <= claim._creationTime ||
-      metadata._creationTime > claim.expiresAt ||
-      metadata.sha256 !== claim.sha256 ||
-      metadata.size !== claim.size
-    ) {
-      await ctx.db.delete(claimId)
+    if (!signatureValid) {
+      await ctx.db.delete(args.claimId)
       return {
         ok: false as const,
-        message: "The uploaded cover was not found.",
-      }
-    }
-    if (
-      metadata.contentType !== claim.contentType ||
-      !SUPPORTED_COVER_TYPES.has(metadata.contentType)
-    ) {
-      await ctx.db.delete(claimId)
-      return {
-        ok: false as const,
-        message: "Use a JPEG, PNG, or WebP image no larger than 10 MB.",
+        message:
+          "The uploaded file does not contain a valid JPEG, PNG, or WebP image.",
       }
     }
 
-    await ctx.db.patch(eventId, {
-      coverStorageId: storageId,
+    await ctx.db.patch(args.eventId, {
+      coverStorageId: args.storageId,
       updatedAt: Date.now(),
     })
-    await ctx.db.delete(claimId)
-    if (event.coverStorageId && event.coverStorageId !== storageId) {
-      await ctx.storage.delete(event.coverStorageId)
+    await ctx.db.delete(args.claimId)
+    if (
+      candidate.event.coverStorageId &&
+      candidate.event.coverStorageId !== args.storageId
+    ) {
+      await ctx.storage.delete(candidate.event.coverStorageId)
     }
     return { ok: true as const }
+  },
+})
+
+export const setCover = action({
+  args: coverArgs,
+  returns: coverResult,
+  handler: async (ctx, args): Promise<CoverResult> => {
+    const inspection: CoverInspectionResult = await ctx.runQuery(
+      internal.eventSetup.inspectCoverUpload,
+      { ...args, now: Date.now() }
+    )
+    let signatureValid = false
+    if (inspection.ok) {
+      const storedFile = await ctx.storage.get(args.storageId)
+      signatureValid =
+        storedFile !== null &&
+        (await hasValidCoverSignature(storedFile, inspection.contentType))
+    }
+    return await ctx.runMutation(internal.eventSetup.finalizeCoverUpload, {
+      ...args,
+      signatureValid,
+    })
   },
 })
 
