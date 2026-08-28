@@ -790,6 +790,10 @@ export function OrderFlow({
                   <FieldLabel htmlFor="guest-phone">Phone number</FieldLabel>
                   <Input
                     id="guest-phone"
+                    name="guestPhone"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
                     className="min-h-12 text-lg"
                     value={guestPhone}
                     onChange={(event) => {
@@ -871,6 +875,10 @@ export function OrderFlow({
                       </FieldLabel>
                       <Input
                         id="detail-phoneNumber"
+                        name="deliveryPhone"
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
                         className="min-h-12 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
