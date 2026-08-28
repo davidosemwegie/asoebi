@@ -1,8 +1,15 @@
+import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 
 import { AuthForm } from "@/components/auth-form"
 import { getSafeAuthContinuation } from "@/lib/auth-continuation"
 import { isAuthenticated } from "@/lib/auth-server"
+
+export const metadata: Metadata = {
+  title: "Sign in",
+  description: "Sign in to Aso Circle.",
+  alternates: { canonical: "/login" },
+}
 
 export default async function LoginPage({
   searchParams,

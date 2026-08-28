@@ -612,7 +612,7 @@ export function OrderFlow({
           <p className="font-medium">
             Step {ORDER_STEPS.indexOf(step) + 1} of 5
           </p>
-          <h1 className="font-heading text-3xl font-semibold">
+          <h1 className="font-display text-3xl font-medium tracking-tight">
             {labels[step]}
           </h1>
         </header>
@@ -1015,7 +1015,7 @@ export function OrderFlow({
         {step === "review" ? (
           <Card>
             <CardContent className="space-y-4 pt-6">
-              <h2 className="font-heading text-xl font-semibold">
+              <h2 className="font-display text-2xl font-medium tracking-tight">
                 Check your order
               </h2>
               <ul className="space-y-2">
@@ -1037,7 +1037,7 @@ export function OrderFlow({
                 ))}
               </ul>
               <p>
-                Fulfillment:{" "}
+                Pickup or delivery:{" "}
                 {formatMoney(
                   proposal.fulfillmentFeeMinor,
                   checkout.event.currency
@@ -1060,7 +1060,7 @@ export function OrderFlow({
         {step === "payment" ? (
           <Card>
             <CardContent className="space-y-5 pt-6">
-              <h2 className="font-heading text-xl font-semibold">
+              <h2 className="font-display text-2xl font-medium tracking-tight">
                 Payment and receipt
               </h2>
               {checkout.paymentInstructions ? (

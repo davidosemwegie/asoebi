@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useState } from "react"
 import { useQuery } from "convex/react"
 
 import { formatMoney } from "@/lib/money"
@@ -18,6 +19,13 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@workspace/ui/components/empty"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@workspace/ui/components/pagination"
 import { ShoppingBagIcon } from "lucide-react"
 
 const paymentWords: Record<string, string> = {
@@ -30,14 +38,16 @@ const progressWords: Record<string, string> = {
   pending: "Pending",
   preparing: "Preparing",
   ready_for_pickup: "Ready for pickup",
-  dispatched: "Dispatched",
-  fulfilled: "Fulfilled",
+  dispatched: "Sent for delivery",
+  fulfilled: "Completed",
   cancelled: "Cancelled",
 }
 
 export function MyOrders() {
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [previousCursors, setPreviousCursors] = useState<(string | null)[]>([])
   const result = useQuery(api.orders.listMine, {
-    paginationOpts: { cursor: null, numItems: 20 },
+    paginationOpts: { cursor, numItems: 20 },
   })
   if (result === undefined)
     return (
@@ -63,28 +73,75 @@ export function MyOrders() {
       </Empty>
     )
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {result.page.map((order) => (
-        <Link
-          key={order._id}
-          href={`/orders/${order._id}`}
-          className="rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle className="text-lg">{order.eventName}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-base">
-              <p className="font-medium">{order.reference}</p>
-              <p>{paymentWords[order.paymentStatus]}</p>
-              <p>{progressWords[order.progress]}</p>
-              <p className="font-semibold">
-                {formatMoney(order.totalMinor, order.currency ?? "NGN")}
-              </p>
-            </CardContent>
-          </Card>
-        </Link>
-      ))}
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-2">
+        {result.page.map((order) => (
+          <Link
+            key={order._id}
+            href={`/orders/${order._id}`}
+            className="rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <Card className="h-full">
+              <CardHeader>
+                <CardTitle className="text-lg">{order.eventName}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1 text-base">
+                <p className="font-medium">{order.reference}</p>
+                {order.lifecycle === "draft" ? (
+                  <p className="font-medium text-primary">Order started</p>
+                ) : null}
+                <p>{paymentWords[order.paymentStatus]}</p>
+                <p>{progressWords[order.progress]}</p>
+                <p className="font-semibold">
+                  {formatMoney(order.totalMinor, order.currency ?? "NGN")}
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
+
+      {previousCursors.length > 0 || !result.isDone ? (
+        <Pagination aria-label="My order pages">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                href="#my-orders-heading"
+                className={
+                  previousCursors.length === 0
+                    ? "pointer-events-none min-h-12 opacity-50"
+                    : "min-h-12"
+                }
+                aria-disabled={previousCursors.length === 0}
+                onClick={(event) => {
+                  event.preventDefault()
+                  if (previousCursors.length === 0) return
+                  const previous = previousCursors.at(-1)
+                  setCursor(previous ?? null)
+                  setPreviousCursors((current) => current.slice(0, -1))
+                }}
+              />
+            </PaginationItem>
+            <PaginationItem>
+              <PaginationNext
+                href="#my-orders-heading"
+                className={
+                  result.isDone
+                    ? "pointer-events-none min-h-12 opacity-50"
+                    : "min-h-12"
+                }
+                aria-disabled={result.isDone}
+                onClick={(event) => {
+                  event.preventDefault()
+                  if (result.isDone) return
+                  setPreviousCursors((current) => [...current, cursor])
+                  setCursor(result.continueCursor)
+                }}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      ) : null}
     </div>
   )
 }

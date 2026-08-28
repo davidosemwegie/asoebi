@@ -87,7 +87,7 @@ function UnavailableEvent() {
             variant="outline"
             className="min-h-12 text-lg"
           >
-            Sign in to Asoebi
+            Sign in to Aso Circle
           </Button>
         </EmptyContent>
       </Empty>
@@ -192,7 +192,7 @@ export function PublicEventLanding({
           <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <SparklesIcon aria-hidden="true" />
           </span>
-          Asoebi
+          Aso Circle
         </div>
 
         <div className="relative mt-6 aspect-[16/7] min-h-48 w-full overflow-hidden rounded-xl bg-muted ring-1 ring-foreground/10">

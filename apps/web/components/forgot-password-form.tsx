@@ -25,10 +25,10 @@ import {
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 
-const controlClassName = "min-h-12 text-base"
-const actionClassName = "min-h-12 w-full px-4 text-base"
+const controlClassName = "min-h-12 text-lg"
+const actionClassName = "min-h-12 w-full px-4 text-lg"
 const linkClassName =
-  "inline-flex min-h-11 items-center justify-center rounded-lg px-3 text-base underline underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+  "inline-flex min-h-11 max-w-full items-center justify-center rounded-lg px-1 text-center text-lg whitespace-normal underline underline-offset-4 outline-none [overflow-wrap:anywhere] hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
 
 export function ForgotPasswordForm({
   continuation = "/",
@@ -86,7 +86,7 @@ export function ForgotPasswordForm({
           <Alert aria-live="polite">
             <CheckCircle2Icon aria-hidden="true" />
             <AlertTitle>Check your email</AlertTitle>
-            <AlertDescription className="text-base">
+            <AlertDescription className="text-lg">
               If an account uses that email address, we sent a password-reset
               link. It may take a few minutes to arrive.
             </AlertDescription>
@@ -107,7 +107,7 @@ export function ForgotPasswordForm({
         >
           <FieldGroup>
             <Field data-invalid={Boolean(emailError)}>
-              <FieldLabel htmlFor="reset-email" className="text-base">
+              <FieldLabel htmlFor="reset-email" className="text-lg">
                 Email
               </FieldLabel>
               <Input
@@ -129,7 +129,7 @@ export function ForgotPasswordForm({
               <Alert variant="destructive" aria-live="polite">
                 <CircleAlertIcon aria-hidden="true" />
                 <AlertTitle>Request not sent</AlertTitle>
-                <AlertDescription className="text-base">
+                <AlertDescription className="text-lg">
                   We couldn’t submit your request. Check your connection and try
                   again.
                 </AlertDescription>

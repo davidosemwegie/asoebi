@@ -27,18 +27,18 @@ type AuthMode = "login" | "signup"
 type AuthField = "name" | "email" | "password"
 type AuthFieldErrors = Partial<Record<AuthField, string>>
 
-const controlClassName = "min-h-12 text-base"
-const actionClassName = "min-h-12 w-full px-4 text-base"
+const controlClassName = "min-h-12 bg-card text-lg"
+const actionClassName = "min-h-12 w-full px-4 text-lg"
 const secondaryActionClassName =
-  "inline-flex min-h-11 items-center justify-center rounded-lg px-2 text-base underline underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+  "inline-flex min-h-11 max-w-full items-center justify-center rounded-lg px-1 text-center text-lg whitespace-normal underline underline-offset-4 outline-none [overflow-wrap:anywhere] hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
 
 const authCopy = {
   login: {
     title: "Welcome back",
-    description: "Sign in to continue to your celebration workspace.",
+    description: "Sign in to continue to your Aso Circle workspace.",
     submit: "Sign in",
     pending: "Signing in…",
-    alternatePrompt: "New to Asoebi?",
+    alternatePrompt: "New to Aso Circle?",
     alternateAction: "Create an account",
     alternateHref: "/signup",
   },
@@ -114,9 +114,7 @@ export function AuthForm({
     )
     setFieldErrors(errors)
 
-    if (Object.keys(errors).length > 0) {
-      return
-    }
+    if (Object.keys(errors).length > 0) return
 
     setIsPending(true)
 
@@ -171,7 +169,7 @@ export function AuthForm({
         <FieldGroup>
           {mode === "signup" ? (
             <Field data-invalid={Boolean(fieldErrors.name)}>
-              <FieldLabel htmlFor="name" className="text-base">
+              <FieldLabel htmlFor="name" className="text-lg">
                 Name
               </FieldLabel>
               <Input
@@ -191,7 +189,7 @@ export function AuthForm({
           ) : null}
 
           <Field data-invalid={Boolean(fieldErrors.email)}>
-            <FieldLabel htmlFor="email" className="text-base">
+            <FieldLabel htmlFor="email" className="text-lg">
               Email
             </FieldLabel>
             <Input
@@ -210,8 +208,8 @@ export function AuthForm({
           </Field>
 
           <Field data-invalid={Boolean(fieldErrors.password)}>
-            <div className="flex min-h-11 items-center justify-between gap-3">
-              <FieldLabel htmlFor="password" className="text-base">
+            <div className="flex flex-col items-start gap-1 min-[280px]:min-h-11 min-[280px]:flex-row min-[280px]:items-center min-[280px]:justify-between min-[280px]:gap-3">
+              <FieldLabel htmlFor="password" className="text-lg">
                 Password
               </FieldLabel>
               {mode === "login" ? (
@@ -246,7 +244,7 @@ export function AuthForm({
               }
             />
             {mode === "signup" ? (
-              <FieldDescription id="password-description" className="text-base">
+              <FieldDescription id="password-description" className="text-lg">
                 Use 8 to 128 characters.
               </FieldDescription>
             ) : null}
@@ -278,7 +276,7 @@ export function AuthForm({
               ) : null}
               {isPending ? copy.pending : copy.submit}
             </Button>
-            <FieldDescription className="text-center text-base">
+            <FieldDescription className="text-center text-lg [overflow-wrap:anywhere]">
               {copy.alternatePrompt}{" "}
               <Link
                 href={getAuthHref(copy.alternateHref, safeContinuation)}

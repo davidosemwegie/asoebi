@@ -28,6 +28,13 @@ import {
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 import { SheetFooter } from "@workspace/ui/components/sheet"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
 import { Textarea } from "@workspace/ui/components/textarea"
 
 export type EventData = NonNullable<FunctionReturnType<typeof api.events.get>>
@@ -178,21 +185,27 @@ export function EventForm({
 
           <Field>
             <FieldLabel htmlFor="event-editor-currency">Currency</FieldLabel>
-            <select
-              id="event-editor-currency"
+            <Select
               name="currency"
               defaultValue={event?.currency ?? "NGN"}
               disabled={isPending || currencyLocked}
-              className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <option value="NGN">NGN — Nigerian naira</option>
-              <option value="USD">USD — US dollar</option>
-              <option value="GBP">GBP — British pound</option>
-              <option value="CAD">CAD — Canadian dollar</option>
-            </select>
+              <SelectTrigger
+                id="event-editor-currency"
+                className="min-h-12 w-full text-base"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NGN">NGN — Nigerian naira</SelectItem>
+                <SelectItem value="USD">USD — US dollar</SelectItem>
+                <SelectItem value="GBP">GBP — British pound</SelectItem>
+                <SelectItem value="CAD">CAD — Canadian dollar</SelectItem>
+              </SelectContent>
+            </Select>
             <FieldDescription>
               {currencyLocked
-                ? "Currency is locked because this event already has catalog items."
+                ? "Currency is locked because this event already has items."
                 : "All items for this event will use this currency."}
             </FieldDescription>
           </Field>
@@ -255,12 +268,17 @@ export function EventForm({
         <Button
           type="button"
           variant="outline"
+          className="min-h-11 px-4 text-base"
           onClick={onCancel}
           disabled={isPending}
         >
           Cancel
         </Button>
-        <Button type="submit" disabled={isPending}>
+        <Button
+          type="submit"
+          className="min-h-12 px-4 text-base"
+          disabled={isPending}
+        >
           {isPending ? (
             <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
           ) : null}

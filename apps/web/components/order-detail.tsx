@@ -97,7 +97,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-8 text-lg">
       <header>
-        <h1 className="font-heading text-3xl font-semibold">
+        <h1 className="font-display text-3xl font-medium tracking-tight">
           Order {order.reference}
         </h1>
         <p className="mt-1 text-lg text-muted-foreground">{event?.name}</p>
@@ -114,8 +114,8 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           <CheckCircle2Icon aria-hidden="true" />
           <AlertTitle>Order cancelled</AlertTitle>
           <AlertDescription>
-            This order has been cancelled. The organizer will handle any payment
-            arrangements outside Asoebi.
+            This order has been cancelled. The organizer will contact you
+            directly about any payment arrangements.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -132,7 +132,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
             {formatMoney(order.totalMinor, order.currency ?? "NGN")}
           </p>
           <p>
-            <strong>Fulfillment:</strong>{" "}
+            <strong>Pickup or delivery:</strong>{" "}
             {order.fulfillmentOptionName ?? "Not selected"}
           </p>
           {order.fulfillmentInstructions ? (
@@ -177,6 +177,17 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           </ol>
         </CardContent>
       </Card>
+      {event?.shareToken &&
+      event.orderingOpen &&
+      order.lifecycle === "draft" ? (
+        <Button
+          nativeButton={false}
+          render={<Link href={`/e/${event.shareToken}/order/items`} />}
+          className="min-h-12 text-lg"
+        >
+          Continue order
+        </Button>
+      ) : null}
       {canCancel ? (
         <Button
           variant="destructive"
@@ -221,19 +232,19 @@ export function OrderDetail({ orderId }: { orderId: string }) {
             </AlertDialogTitle>
             <AlertDialogDescription className="text-lg">
               This releases the items set aside for your order. Any payment
-              arrangement is handled with the organizer outside Asoebi.
+              arrangement is handled directly with the organizer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel
-              className="min-h-11 px-4 text-lg"
+              className="min-h-12 px-4 text-lg"
               disabled={isCancelling}
             >
               Keep order
             </AlertDialogCancel>
             <AlertDialogAction
               type="button"
-              className="min-h-11 px-4 text-lg"
+              className="min-h-12 px-4 text-lg"
               disabled={isCancelling}
               onClick={() => void cancelOrder()}
             >

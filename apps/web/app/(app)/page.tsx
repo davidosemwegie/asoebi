@@ -1,4 +1,10 @@
+import type { Metadata } from "next"
+
 import { EventsOverview } from "@/components/events-overview"
+
+export const metadata: Metadata = {
+  title: "Home",
+}
 
 export default async function HomePage({
   searchParams,

@@ -129,10 +129,10 @@ export function CatalogItemSheet({
         finalFocus={getReturnFocus}
       >
         <SheetHeader>
-          <SheetTitle>{item ? "Edit item" : "Add catalog item"}</SheetTitle>
+          <SheetTitle>{item ? "Edit item" : "Add item"}</SheetTitle>
           <SheetDescription>
             {item
-              ? "Update how this item appears in the organizer catalog."
+              ? "Update how this item appears to you and your guests."
               : "Add an item organizers can prepare for this event."}
           </SheetDescription>
         </SheetHeader>
@@ -230,7 +230,8 @@ export function CatalogItemSheet({
                   />
                   {item?.reservedQuantity ? (
                     <FieldDescription>
-                      At least {item.reservedQuantity} already reserved.
+                      At least {item.reservedQuantity} already set aside for
+                      orders.
                     </FieldDescription>
                   ) : (
                     <FieldDescription>
@@ -254,12 +255,17 @@ export function CatalogItemSheet({
             <Button
               type="button"
               variant="outline"
+              className="min-h-11 px-4 text-base"
               onClick={() => onOpenChange(false)}
               disabled={isPending}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isPending}>
+            <Button
+              type="submit"
+              className="min-h-12 px-4 text-base"
+              disabled={isPending}
+            >
               {isPending ? (
                 <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
               ) : null}

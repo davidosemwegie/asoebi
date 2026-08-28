@@ -261,7 +261,7 @@ export const enqueueRendered = internalMutation({
     }
 
     const componentEmailId = await resend.sendEmail(ctx, {
-      from: env.EMAIL_FROM ?? "Asoebi <onboarding@resend.dev>",
+      from: env.EMAIL_FROM ?? "Aso Circle <onboarding@resend.dev>",
       to: args.to,
       subject: notification.subject,
       html: args.html,

@@ -135,8 +135,8 @@ function copyForTemplate(template: NotificationTemplate): EmailCopy {
     case "verify_email":
       return {
         heading: "Verify your email address",
-        preview: "Verify your email address for your Asoebi account.",
-        message: `${greeting(template.recipientName)} Please verify your email address to finish setting up your Asoebi account.`,
+        preview: "Verify your email address for your Aso Circle account.",
+        message: `${greeting(template.recipientName)} Please verify your email address to finish setting up your Aso Circle account.`,
         actionLabel: "Verify email address",
       }
     case "reset_password": {
@@ -144,8 +144,8 @@ function copyForTemplate(template: NotificationTemplate): EmailCopy {
       const duration = `${minutes} minute${minutes === 1 ? "" : "s"}`
       return {
         heading: "Reset your password",
-        preview: "Use this secure link to reset your Asoebi password.",
-        message: `${greeting(template.recipientName)} A password reset was requested for your Asoebi account. This link expires in ${duration}.`,
+        preview: "Use this secure link to reset your Aso Circle password.",
+        message: `${greeting(template.recipientName)} A password reset was requested for your Aso Circle account. This link expires in ${duration}.`,
         detail:
           "If you did not request this change, you can ignore this email. Your password will stay the same.",
         actionLabel: "Reset password",
@@ -155,7 +155,7 @@ function copyForTemplate(template: NotificationTemplate): EmailCopy {
       return {
         heading: "You are invited",
         preview: `${template.organizerName} invited you to ${template.eventName}.`,
-        message: `${greeting(template.recipientName)} ${template.organizerName} invited you to ${template.eventName} on Asoebi.`,
+        message: `${greeting(template.recipientName)} ${template.organizerName} invited you to ${template.eventName} on Aso Circle.`,
         detail: `Event: ${template.eventName}`,
         actionLabel: "View invitation",
       }
@@ -163,7 +163,7 @@ function copyForTemplate(template: NotificationTemplate): EmailCopy {
       return {
         heading: "Your order was submitted",
         preview: `We received order ${template.orderReference}.`,
-        message: `${greeting(template.recipientName)} We received your order. Open Asoebi to see its current status.`,
+        message: `${greeting(template.recipientName)} We received your order. Open Aso Circle to see its current status.`,
         detail: orderDetail(template),
         actionLabel: "View order",
       }
@@ -187,7 +187,7 @@ function copyForTemplate(template: NotificationTemplate): EmailCopy {
       return {
         heading: "Your payment needs attention",
         preview: `Payment needs attention for order ${template.orderReference}.`,
-        message: `${greeting(template.recipientName)} We could not confirm payment for your order. Open Asoebi to review the status and next steps.`,
+        message: `${greeting(template.recipientName)} We could not confirm payment for your order. Open Aso Circle to review the status and next steps.`,
         detail: orderDetail(template),
         actionLabel: "Review order",
       }
@@ -203,7 +203,7 @@ function copyForTemplate(template: NotificationTemplate): EmailCopy {
       return {
         heading: "The organizer cancelled your order",
         preview: `The organizer cancelled order ${template.orderReference}.`,
-        message: `${greeting(template.recipientName)} The organizer cancelled your order. Open Asoebi to see the details.`,
+        message: `${greeting(template.recipientName)} The organizer cancelled your order. Open Aso Circle to see the details.`,
         detail: orderDetail(template),
         actionLabel: "View order",
       }
@@ -219,7 +219,7 @@ function copyForTemplate(template: NotificationTemplate): EmailCopy {
       return {
         heading: "Your order is ready for pickup",
         preview: `Order ${template.orderReference} is ready for pickup.`,
-        message: `${greeting(template.recipientName)} Your order is ready for pickup. Open Asoebi to see the latest details.`,
+        message: `${greeting(template.recipientName)} Your order is ready for pickup. Open Aso Circle to see the latest details.`,
         detail: orderDetail(template),
         actionLabel: "View order",
       }
@@ -227,7 +227,7 @@ function copyForTemplate(template: NotificationTemplate): EmailCopy {
       return {
         heading: "Your order was sent for delivery",
         preview: `Order ${template.orderReference} is on its way.`,
-        message: `${greeting(template.recipientName)} Your order has been sent for delivery. Open Asoebi to see its current status.`,
+        message: `${greeting(template.recipientName)} Your order has been sent for delivery. Open Aso Circle to see its current status.`,
         detail: orderDetail(template),
         actionLabel: "View order",
       }
@@ -255,7 +255,7 @@ function assertAbsoluteHttpUrl(value: string): void {
   }
 }
 
-function AsoebiEmail({
+function AsoCircleEmail({
   actionLabel,
   actionUrl,
   detail,
@@ -269,7 +269,7 @@ function AsoebiEmail({
       <Body style={styles.body}>
         <Preview>{preview}</Preview>
         <Container style={styles.container}>
-          <Text style={styles.brand}>ASOEBI</Text>
+          <Text style={styles.brand}>ASO CIRCLE</Text>
           <Heading as="h1" style={styles.heading}>
             {heading}
           </Heading>
@@ -295,8 +295,8 @@ function AsoebiEmail({
           <Text style={styles.fallbackUrl}>{actionUrl}</Text>
           <Hr style={styles.divider} />
           <Text style={styles.footer}>
-            This message was sent by Asoebi about your account, invitation, or
-            order.
+            This message was sent by Aso Circle about your account, invitation,
+            or order.
           </Text>
         </Container>
       </Body>
@@ -314,7 +314,7 @@ export async function renderNotificationEmail(
 }> {
   assertAbsoluteHttpUrl(template.actionUrl)
   const copy = copyForTemplate(template)
-  const email = <AsoebiEmail {...copy} actionUrl={template.actionUrl} />
+  const email = <AsoCircleEmail {...copy} actionUrl={template.actionUrl} />
 
   const [html, text] = await Promise.all([
     render(email),

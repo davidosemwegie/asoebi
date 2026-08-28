@@ -28,10 +28,10 @@ import {
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
 
-const controlClassName = "min-h-12 text-base"
-const actionClassName = "min-h-12 w-full px-4 text-base"
+const controlClassName = "min-h-12 text-lg"
+const actionClassName = "min-h-12 w-full px-4 text-lg"
 const linkClassName =
-  "inline-flex min-h-11 items-center justify-center rounded-lg px-3 text-base underline underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+  "inline-flex min-h-11 max-w-full items-center justify-center rounded-lg px-1 text-center text-lg whitespace-normal underline underline-offset-4 outline-none [overflow-wrap:anywhere] hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
 
 function getVerificationCallbackHref(continuation: string) {
   const searchParams = new URLSearchParams({ verified: "1" })
@@ -115,8 +115,8 @@ export function VerifyEmailForm({
           <Alert aria-live="polite">
             <CheckCircle2Icon aria-hidden="true" />
             <AlertTitle>Email verified</AlertTitle>
-            <AlertDescription className="text-base">
-              You can continue using Asoebi.
+            <AlertDescription className="text-lg">
+              You can continue using Aso Circle.
             </AlertDescription>
           </Alert>
           {sessionPending ? (
@@ -147,7 +147,7 @@ export function VerifyEmailForm({
           <Alert variant="destructive" aria-live="polite">
             <CircleAlertIcon aria-hidden="true" />
             <AlertTitle>Verification link unavailable</AlertTitle>
-            <AlertDescription className="text-base">
+            <AlertDescription className="text-lg">
               This verification link is invalid or has expired. Request a new
               one below.
             </AlertDescription>
@@ -156,15 +156,15 @@ export function VerifyEmailForm({
           <Alert aria-live="polite">
             <CheckCircle2Icon aria-hidden="true" />
             <AlertTitle>Verification link accepted</AlertTitle>
-            <AlertDescription className="text-base">
-              Sign in to refresh your account and continue using Asoebi.
+            <AlertDescription className="text-lg">
+              Sign in to refresh your account and continue using Aso Circle.
             </AlertDescription>
           </Alert>
         ) : emailSent ? (
           <Alert aria-live="polite">
             <MailIcon aria-hidden="true" />
             <AlertTitle>Check your email</AlertTitle>
-            <AlertDescription className="text-base">
+            <AlertDescription className="text-lg">
               We sent a verification link. It may take a few minutes to arrive.
             </AlertDescription>
           </Alert>
@@ -174,7 +174,7 @@ export function VerifyEmailForm({
           <Alert aria-live="polite">
             <CheckCircle2Icon aria-hidden="true" />
             <AlertTitle>Verification requested</AlertTitle>
-            <AlertDescription className="text-base">
+            <AlertDescription className="text-lg">
               If that address still needs verification, we sent a new link.
             </AlertDescription>
           </Alert>
@@ -188,17 +188,14 @@ export function VerifyEmailForm({
             <FieldGroup>
               {sessionEmail ? (
                 <Field>
-                  <FieldTitle className="text-base">Email</FieldTitle>
-                  <FieldDescription className="text-base text-foreground">
+                  <FieldTitle className="text-lg">Email</FieldTitle>
+                  <FieldDescription className="text-lg text-foreground">
                     We’ll send the link to {sessionEmail}.
                   </FieldDescription>
                 </Field>
               ) : (
                 <Field data-invalid={Boolean(emailError)}>
-                  <FieldLabel
-                    htmlFor="verification-email"
-                    className="text-base"
-                  >
+                  <FieldLabel htmlFor="verification-email" className="text-lg">
                     Email
                   </FieldLabel>
                   <Input
@@ -225,7 +222,7 @@ export function VerifyEmailForm({
                 <Alert variant="destructive" aria-live="polite">
                   <CircleAlertIcon aria-hidden="true" />
                   <AlertTitle>Verification not requested</AlertTitle>
-                  <AlertDescription className="text-base">
+                  <AlertDescription className="text-lg">
                     We couldn’t submit your request. Check your connection and
                     try again.
                   </AlertDescription>
@@ -260,7 +257,7 @@ export function VerifyEmailForm({
             >
               Continue for now
             </Button>
-            <p className="text-base text-pretty text-muted-foreground">
+            <p className="text-lg text-pretty text-muted-foreground">
               You can start an order before verification. You’ll need to verify
               your email before submitting it later.
             </p>

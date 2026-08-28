@@ -59,7 +59,7 @@ async function enqueueAuthEmail(
 
 export const createAuth = (ctx: GenericCtx<DataModel>) =>
   betterAuth({
-    appName: "Asoebi",
+    appName: "Aso Circle",
     baseURL: {
       allowedHosts: [
         "localhost:3000",

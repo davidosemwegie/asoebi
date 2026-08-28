@@ -105,6 +105,7 @@ function ReorderControls({
               type="button"
               variant="ghost"
               size="icon-sm"
+              className="size-11"
               aria-label={`Move ${item.name} up`}
               disabled={disabled || index === 0}
               onClick={() => onMove(item._id, "up")}
@@ -122,6 +123,7 @@ function ReorderControls({
               type="button"
               variant="ghost"
               size="icon-sm"
+              className="size-11"
               aria-label={`Move ${item.name} down`}
               disabled={disabled || index === itemCount - 1}
               onClick={() => onMove(item._id, "down")}
@@ -159,6 +161,7 @@ function ItemActions({
             type="button"
             variant="ghost"
             size="icon-sm"
+            className="size-11"
             disabled={disabled}
           />
         }
@@ -166,8 +169,9 @@ function ItemActions({
         <MoreHorizontalIcon aria-hidden="true" />
         <span className="sr-only">Actions for {item.name}</span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
+      <DropdownMenuContent align="end" className="w-40 text-base">
         <DropdownMenuItem
+          className="min-h-11 text-base"
           onClick={() => onEdit(item, triggerRef.current)}
           disabled={disabled}
         >
@@ -175,6 +179,7 @@ function ItemActions({
           Edit
         </DropdownMenuItem>
         <DropdownMenuItem
+          className="min-h-11 text-base"
           onClick={() => onVisibilityChange(item)}
           disabled={disabled}
         >
@@ -287,15 +292,15 @@ export function EventCatalog() {
           <div className="space-y-1">
             <h2
               id="catalog-heading"
-              className="font-heading text-xl font-medium text-balance"
+              className="font-display text-2xl font-medium tracking-tight text-balance"
             >
-              Product catalog
+              Items
             </h2>
-            <p className="text-sm text-pretty text-muted-foreground">
+            <p className="text-base text-pretty text-muted-foreground">
               Add up to 100 priced items and manage their inventory and
               visibility.
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-base text-muted-foreground">
               {items === undefined
                 ? "Loading item count…"
                 : `${items.length} of 100 items`}
@@ -307,6 +312,7 @@ export function EventCatalog() {
               type="button"
               onClick={() => openEditor(null, addButtonRef.current)}
               disabled={isArchived || isAtLimit || items === undefined}
+              className="min-h-12 text-base"
             >
               <PlusIcon aria-hidden="true" />
               Add item
@@ -317,9 +323,9 @@ export function EventCatalog() {
         {isArchived ? (
           <Alert>
             <LockKeyholeIcon aria-hidden="true" />
-            <AlertTitle>Archived catalog</AlertTitle>
+            <AlertTitle>Archived items</AlertTitle>
             <AlertDescription>
-              This catalog is read-only. Restore the event before changing its
+              These items are read-only. Restore the event before changing its
               items.
             </AlertDescription>
           </Alert>
@@ -328,7 +334,7 @@ export function EventCatalog() {
         {isAtLimit ? (
           <Alert>
             <PackageOpenIcon aria-hidden="true" />
-            <AlertTitle>Catalog limit reached</AlertTitle>
+            <AlertTitle>Item limit reached</AlertTitle>
             <AlertDescription>
               This event already has the maximum of 100 items.
             </AlertDescription>
@@ -338,7 +344,7 @@ export function EventCatalog() {
         {actionError ? (
           <Alert variant="destructive">
             <CircleAlertIcon aria-hidden="true" />
-            <AlertTitle>Catalog not updated</AlertTitle>
+            <AlertTitle>Items not updated</AlertTitle>
             <AlertDescription>{actionError}</AlertDescription>
           </Alert>
         ) : null}
@@ -355,7 +361,7 @@ export function EventCatalog() {
               <EmptyMedia variant="icon">
                 <PackageOpenIcon aria-hidden="true" />
               </EmptyMedia>
-              <EmptyTitle>No catalog items yet</EmptyTitle>
+              <EmptyTitle>No items yet</EmptyTitle>
               <EmptyDescription>
                 Add the first item with a price, unit, and available quantity.
               </EmptyDescription>
@@ -364,6 +370,7 @@ export function EventCatalog() {
               <EmptyContent>
                 <Button
                   type="button"
+                  className="min-h-12 text-base"
                   onClick={(clickEvent) =>
                     openEditor(null, clickEvent.currentTarget)
                   }
@@ -378,7 +385,7 @@ export function EventCatalog() {
           <>
             <Card className="hidden py-0 md:flex">
               <CardContent className="px-0">
-                <Table>
+                <Table className="text-base">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
@@ -393,11 +400,11 @@ export function EventCatalog() {
                       <TableRow key={item._id}>
                         <TableCell className="max-w-md whitespace-normal">
                           <div className="font-medium">{item.name}</div>
-                          <div className="text-xs text-muted-foreground">
+                          <div className="text-base text-muted-foreground">
                             {item.unitLabel}
                           </div>
                           {item.description ? (
-                            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                            <p className="mt-1 line-clamp-2 text-base text-muted-foreground">
                               {item.description}
                             </p>
                           ) : null}
@@ -405,7 +412,7 @@ export function EventCatalog() {
                         <TableCell className="font-mono tabular-nums">
                           {formatMoney(item.priceMinor, event.currency)}
                         </TableCell>
-                        <TableCell className="font-mono text-xs tabular-nums">
+                        <TableCell className="font-mono text-base tabular-nums">
                           Available {item.availableQuantity} of{" "}
                           {item.inventoryTotal}
                         </TableCell>
@@ -442,7 +449,7 @@ export function EventCatalog() {
                   </CardHeader>
                   <CardContent className="space-y-3">
                     {item.description ? (
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-base text-muted-foreground">
                         {item.description}
                       </p>
                     ) : null}
@@ -452,7 +459,7 @@ export function EventCatalog() {
                         <p className="font-mono font-medium tabular-nums">
                           {formatMoney(item.priceMinor, event.currency)}
                         </p>
-                        <p className="font-mono text-xs text-muted-foreground tabular-nums">
+                        <p className="font-mono text-base text-muted-foreground tabular-nums">
                           Available {item.availableQuantity} of{" "}
                           {item.inventoryTotal}
                         </p>

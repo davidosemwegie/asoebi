@@ -22,7 +22,9 @@ export default async function AppLayout({
       <AppSidebar preloadedUser={preloadedUser} />
       <SidebarInset>
         <PageHeader />
-        <div className="flex flex-1 flex-col p-4 pt-0">{children}</div>
+        <div className="flex flex-1 flex-col px-5 pb-8 md:px-8 lg:px-12">
+          {children}
+        </div>
       </SidebarInset>
     </SidebarProvider>
   )

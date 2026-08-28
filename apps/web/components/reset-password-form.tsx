@@ -29,10 +29,10 @@ import { Input } from "@workspace/ui/components/input"
 type PasswordField = "password" | "confirmation"
 type PasswordErrors = Partial<Record<PasswordField, string>>
 
-const controlClassName = "min-h-12 text-base"
-const actionClassName = "min-h-12 w-full px-4 text-base"
+const controlClassName = "min-h-12 text-lg"
+const actionClassName = "min-h-12 w-full px-4 text-lg"
 const linkClassName =
-  "inline-flex min-h-11 items-center justify-center rounded-lg px-3 text-base underline underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+  "inline-flex min-h-11 max-w-full items-center justify-center rounded-lg px-1 text-center text-lg whitespace-normal underline underline-offset-4 outline-none [overflow-wrap:anywhere] hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
 
 function isInvalidResetToken(error: { code?: string } | null | undefined) {
   return error?.code === "INVALID_TOKEN" || error?.code === "TOKEN_EXPIRED"
@@ -114,7 +114,7 @@ export function ResetPasswordForm({
           <Alert aria-live="polite">
             <CheckCircle2Icon aria-hidden="true" />
             <AlertTitle>Password updated</AlertTitle>
-            <AlertDescription className="text-base">
+            <AlertDescription className="text-lg">
               Sign in with your new password to continue.
             </AlertDescription>
           </Alert>
@@ -139,7 +139,7 @@ export function ResetPasswordForm({
           <Alert variant="destructive" aria-live="polite">
             <CircleAlertIcon aria-hidden="true" />
             <AlertTitle>Request a new link</AlertTitle>
-            <AlertDescription className="text-base">
+            <AlertDescription className="text-lg">
               Password-reset links can only be used once and expire for your
               security.
             </AlertDescription>
@@ -168,7 +168,7 @@ export function ResetPasswordForm({
       >
         <FieldGroup>
           <Field data-invalid={Boolean(fieldErrors.password)}>
-            <FieldLabel htmlFor="new-password" className="text-base">
+            <FieldLabel htmlFor="new-password" className="text-lg">
               New password
             </FieldLabel>
             <Input
@@ -189,10 +189,7 @@ export function ResetPasswordForm({
                 .filter(Boolean)
                 .join(" ")}
             />
-            <FieldDescription
-              id="new-password-description"
-              className="text-base"
-            >
+            <FieldDescription id="new-password-description" className="text-lg">
               Use 8 to 128 characters.
             </FieldDescription>
             <FieldError id="new-password-error">
@@ -201,7 +198,7 @@ export function ResetPasswordForm({
           </Field>
 
           <Field data-invalid={Boolean(fieldErrors.confirmation)}>
-            <FieldLabel htmlFor="confirm-password" className="text-base">
+            <FieldLabel htmlFor="confirm-password" className="text-lg">
               Confirm new password
             </FieldLabel>
             <Input
@@ -228,7 +225,7 @@ export function ResetPasswordForm({
             <Alert variant="destructive" aria-live="polite">
               <CircleAlertIcon aria-hidden="true" />
               <AlertTitle>Password not updated</AlertTitle>
-              <AlertDescription className="text-base">
+              <AlertDescription className="text-lg">
                 We couldn’t update your password. Check your connection and try
                 again.
               </AlertDescription>

@@ -72,12 +72,19 @@ import {
   FieldSet,
 } from "@workspace/ui/components/field"
 import { Input } from "@workspace/ui/components/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
 import { Textarea } from "@workspace/ui/components/textarea"
 
 const DEFAULT_BANNER = "/images/default-event-banner.webp"
 const MAX_COVER_BYTES = 10 * 1024 * 1024
 const controlClassName = "min-h-12 text-base"
-const actionClassName = "min-h-11 px-4 text-base"
+const actionClassName = "min-h-12 px-4 text-base"
 
 type EventData = NonNullable<FunctionReturnType<typeof api.events.get>>
 type FulfillmentOption = EventData["fulfillmentOptions"][number]
@@ -313,8 +320,8 @@ function EventCover() {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove the uploaded cover?</AlertDialogTitle>
             <AlertDialogDescription className="text-base">
-              The stored image will be deleted and the standard Asoebi banner
-              will appear instead.
+              The stored image will be deleted and the standard Aso Circle
+              banner will appear instead.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -626,20 +633,26 @@ function EventDetailsForm() {
               <FieldLabel htmlFor="setup-currency" className="text-base">
                 Currency
               </FieldLabel>
-              <select
-                id="setup-currency"
+              <Select
                 name="currency"
                 defaultValue={event.currency}
                 disabled={
                   isPending || currencyLocked || event.status === "archived"
                 }
-                className="min-h-12 w-full rounded-lg border border-input bg-background px-3 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <option value="NGN">NGN — Nigerian naira</option>
-                <option value="USD">USD — US dollar</option>
-                <option value="GBP">GBP — British pound</option>
-                <option value="CAD">CAD — Canadian dollar</option>
-              </select>
+                <SelectTrigger
+                  id="setup-currency"
+                  className="min-h-12 w-full text-base"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NGN">NGN — Nigerian naira</SelectItem>
+                  <SelectItem value="USD">USD — US dollar</SelectItem>
+                  <SelectItem value="GBP">GBP — British pound</SelectItem>
+                  <SelectItem value="CAD">CAD — Canadian dollar</SelectItem>
+                </SelectContent>
+              </Select>
               <FieldDescription className="text-base">
                 {currencyLocked
                   ? "Currency is locked because this event has items."
@@ -735,8 +748,8 @@ function PaymentInstructions() {
       <CardHeader>
         <CardTitle className="text-lg">Payment instructions</CardTitle>
         <CardDescription className="text-base">
-          Explain how guests should pay outside Asoebi. These instructions are
-          event-specific.
+          Explain how guests should pay outside Aso Circle. These instructions
+          are event-specific.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -868,7 +881,7 @@ function FulfillmentEditor({
     if (Object.keys(nextErrors).length > 0 || feeMinor === null) {
       setFeedback({
         type: "error",
-        message: "Review the highlighted fulfillment details.",
+        message: "Review the highlighted pickup or delivery details.",
       })
       return
     }
@@ -899,13 +912,15 @@ function FulfillmentEditor({
       if (option) await updateOption({ optionId: option._id, ...values })
       else await createOption({ eventId: event._id, ...values })
       onDone(
-        option ? "Fulfillment option updated." : "Fulfillment option added."
+        option
+          ? "Pickup or delivery option updated."
+          : "Pickup or delivery option added."
       )
     } catch {
       setFeedback({
         type: "error",
         message:
-          "We couldn't save this fulfillment option. Review the fields and try again.",
+          "We couldn't save this pickup or delivery option. Review the fields and try again.",
       })
     } finally {
       setIsPending(false)
@@ -925,7 +940,7 @@ function FulfillmentEditor({
       noValidate
     >
       <h3 className="font-heading text-lg font-medium">
-        {option ? `Edit ${option.name}` : "Add a fulfillment option"}
+        {option ? `Edit ${option.name}` : "Add a pickup or delivery option"}
       </h3>
       <div className="grid gap-5 md:grid-cols-2">
         <Field data-invalid={Boolean(errors.name)}>
@@ -952,19 +967,23 @@ function FulfillmentEditor({
           <FieldLabel htmlFor="fulfillment-type" className="text-base">
             Type
           </FieldLabel>
-          <select
-            id="fulfillment-type"
+          <Select
             name="type"
             value={type}
-            onChange={(changeEvent) =>
-              setType(changeEvent.target.value as "pickup" | "delivery")
-            }
-            className="min-h-12 rounded-lg border border-input bg-background px-3 text-base outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            onValueChange={(value) => setType(value as "pickup" | "delivery")}
             disabled={isPending}
           >
-            <option value="pickup">Pickup</option>
-            <option value="delivery">Delivery</option>
-          </select>
+            <SelectTrigger
+              id="fulfillment-type"
+              className="min-h-12 w-full text-base"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pickup">Pickup</SelectItem>
+              <SelectItem value="delivery">Delivery</SelectItem>
+            </SelectContent>
+          </Select>
         </Field>
       </div>
       <Field data-invalid={Boolean(errors.fee)}>
@@ -1058,7 +1077,10 @@ function FulfillmentEditor({
       <CheckboxField name="enabled" defaultChecked={option?.enabled ?? true}>
         Enable this option for guests
       </CheckboxField>
-      <FeedbackAlert feedback={feedback} title="Fulfillment option status" />
+      <FeedbackAlert
+        feedback={feedback}
+        title="Pickup or delivery option status"
+      />
       <div className="flex flex-wrap gap-3">
         <Button type="submit" className={actionClassName} disabled={isPending}>
           {isPending ? (
@@ -1137,7 +1159,7 @@ function FulfillmentOptions() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">Fulfillment options</CardTitle>
+        <CardTitle className="text-lg">Pickup or delivery</CardTitle>
         <CardDescription className="text-base">
           Offer named pickup or delivery choices with a flat event-currency fee
           and only the guest details each choice needs.
@@ -1147,7 +1169,7 @@ function FulfillmentOptions() {
         {event.fulfillmentOptions.length === 0 ? (
           <Alert>
             <PackageCheckIcon aria-hidden="true" />
-            <AlertTitle>No fulfillment options yet</AlertTitle>
+            <AlertTitle>No pickup or delivery options yet</AlertTitle>
             <AlertDescription>
               Add and enable at least one option before publishing.
             </AlertDescription>
@@ -1221,7 +1243,7 @@ function FulfillmentOptions() {
             ))}
           </div>
         )}
-        <FeedbackAlert feedback={feedback} title="Fulfillment status" />
+        <FeedbackAlert feedback={feedback} title="Pickup or delivery status" />
         {editingId ? (
           <FulfillmentEditor
             key={editingId}
@@ -1241,7 +1263,7 @@ function FulfillmentOptions() {
               event.fulfillmentOptions.length >= 20
             }
           >
-            <PlusIcon aria-hidden="true" /> Add fulfillment option
+            <PlusIcon aria-hidden="true" /> Add pickup or delivery option
           </Button>
         )}
       </CardContent>

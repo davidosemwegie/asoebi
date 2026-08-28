@@ -1,6 +1,7 @@
-# shadcn/ui monorepo template
+# Aso Circle
 
-This is a Next.js monorepo template with shadcn/ui.
+A premium celebration coordination platform built with Next.js, Convex, and
+shadcn/ui.
 
 ## Local development
 

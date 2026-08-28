@@ -1,3 +1,4 @@
+import type { Metadata } from "next"
 import { Settings2Icon } from "lucide-react"
 
 import {
@@ -7,6 +8,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@workspace/ui/components/empty"
+
+export const metadata: Metadata = {
+  title: "Settings",
+  alternates: { canonical: "/settings" },
+}
 
 export default function SettingsPage() {
   return (
