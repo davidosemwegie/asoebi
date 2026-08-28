@@ -65,6 +65,44 @@ export const itemFields = v.object({
   updatedAt: v.number(),
 })
 
+// Orders intentionally retain three independent axes.  Do not collapse these
+// into a single generic "status": the organizer workflow needs to reason about
+// payment and fulfillment independently of the guest-visible lifecycle.
+export const orderLifecycle = v.union(
+  v.literal("draft"),
+  v.literal("submitted"),
+  v.literal("cancelled")
+)
+export const paymentStatus = v.union(
+  v.literal("not_submitted"),
+  v.literal("pending_review"),
+  v.literal("confirmed"),
+  v.literal("rejected")
+)
+export const orderProgress = v.union(
+  v.literal("pending"),
+  v.literal("preparing"),
+  v.literal("ready_for_pickup"),
+  v.literal("dispatched"),
+  v.literal("fulfilled"),
+  v.literal("cancelled")
+)
+
+export const reservationState = v.union(
+  v.literal("none"),
+  v.literal("reserved"),
+  v.literal("released")
+)
+
+export const fulfillmentDetails = v.object({
+  pickupContact: v.optional(v.string()),
+  recipientName: v.optional(v.string()),
+  phoneNumber: v.optional(v.string()),
+  address: v.optional(v.string()),
+  availability: v.optional(v.string()),
+  notes: v.optional(v.string()),
+})
+
 export default defineSchema({
   events: defineTable(eventFields.fields)
     .index("by_ownerId", ["ownerId"])
@@ -80,11 +118,175 @@ export default defineSchema({
   eventAttendees: defineTable({
     eventId: v.id("events"),
     userId: v.string(),
+    // Optional for the existing attendee rows created before ordering shipped.
+    activeOrderId: v.optional(v.id("orders")),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_eventId_and_userId", ["eventId", "userId"])
     .index("by_userId_and_eventId", ["userId", "eventId"]),
+  orders: defineTable({
+    eventId: v.id("events"),
+    attendeeId: v.id("eventAttendees"),
+    userId: v.string(),
+    reference: v.string(),
+    lifecycle: orderLifecycle,
+    paymentStatus,
+    progress: orderProgress,
+    reservationState,
+    guestName: v.optional(v.string()),
+    guestEmail: v.optional(v.string()),
+    guestPhone: v.optional(v.string()),
+    fulfillmentOptionId: v.optional(v.id("fulfillmentOptions")),
+    fulfillmentOptionName: v.optional(v.string()),
+    fulfillmentType: v.optional(fulfillmentType),
+    fulfillmentInstructions: v.optional(v.string()),
+    fulfillmentRequiredFields: v.optional(fulfillmentRequiredFields),
+    fulfillmentDetails: v.optional(fulfillmentDetails),
+    currency: v.optional(v.string()),
+    itemSubtotalMinor: v.number(),
+    fulfillmentFeeMinor: v.number(),
+    totalMinor: v.number(),
+    currentProofId: v.optional(v.id("paymentProofs")),
+    proofRequired: v.boolean(),
+    searchText: v.string(),
+    submittedAt: v.optional(v.number()),
+    reviewedAt: v.optional(v.number()),
+    cancelledAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_attendeeId", ["attendeeId"])
+    .index("by_userId_and_updatedAt", ["userId", "updatedAt"])
+    .index("by_eventId_and_lifecycle_and_updatedAt", [
+      "eventId",
+      "lifecycle",
+      "updatedAt",
+    ])
+    .index("by_eventId_and_paymentStatus_and_updatedAt", [
+      "eventId",
+      "paymentStatus",
+      "updatedAt",
+    ])
+    .index("by_eventId_and_progress_and_updatedAt", [
+      "eventId",
+      "progress",
+      "updatedAt",
+    ])
+    .index("by_eventId_and_fulfillmentOptionId_and_updatedAt", [
+      "eventId",
+      "fulfillmentOptionId",
+      "updatedAt",
+    ])
+    .searchIndex("search_eventId_and_text", {
+      searchField: "searchText",
+      filterFields: ["eventId", "paymentStatus", "progress", "lifecycle"],
+    }),
+  orderLines: defineTable({
+    eventId: v.id("events"),
+    orderId: v.id("orders"),
+    itemId: v.id("items"),
+    itemName: v.string(),
+    itemDescription: v.optional(v.string()),
+    unitLabel: v.string(),
+    quantity: v.number(),
+    unitPriceMinor: v.number(),
+    lineTotalMinor: v.number(),
+    currency: v.string(),
+    // Indexed projections are deliberately duplicated so PR 6 can filter by
+    // item before pagination instead of filtering a page in memory.
+    paymentStatus,
+    progress: orderProgress,
+    fulfillmentOptionId: v.optional(v.id("fulfillmentOptions")),
+    searchText: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_orderId", ["orderId"])
+    .index("by_eventId_and_itemId_and_paymentStatus", [
+      "eventId",
+      "itemId",
+      "paymentStatus",
+    ])
+    .index("by_eventId_and_itemId_and_progress", [
+      "eventId",
+      "itemId",
+      "progress",
+    ])
+    .index("by_eventId_and_fulfillmentOptionId_and_paymentStatus", [
+      "eventId",
+      "fulfillmentOptionId",
+      "paymentStatus",
+    ]),
+  paymentProofs: defineTable({
+    eventId: v.id("events"),
+    attendeeId: v.id("eventAttendees"),
+    orderId: v.optional(v.id("orders")),
+    storageId: v.id("_storage"),
+    contentType: v.string(),
+    size: v.number(),
+    sha256: v.string(),
+    submittedByUserId: v.string(),
+    status: v.union(
+      v.literal("active"),
+      v.literal("invalidated"),
+      v.literal("orphaned")
+    ),
+    invalidatedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_orderId", ["orderId"])
+    .index("by_eventId_and_attendeeId", ["eventId", "attendeeId"])
+    .index("by_storageId", ["storageId"]),
+  orderStatusHistory: defineTable({
+    orderId: v.id("orders"),
+    eventId: v.id("events"),
+    actorUserId: v.string(),
+    actorRole: v.union(
+      v.literal("guest"),
+      v.literal("organizer"),
+      v.literal("system")
+    ),
+    previousLifecycle: orderLifecycle,
+    lifecycle: orderLifecycle,
+    previousPaymentStatus: paymentStatus,
+    paymentStatus,
+    previousProgress: orderProgress,
+    progress: orderProgress,
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_orderId_and_createdAt", ["orderId", "createdAt"])
+    .index("by_eventId_and_createdAt", ["eventId", "createdAt"]),
+  orderRequestReceipts: defineTable({
+    attendeeId: v.id("eventAttendees"),
+    orderId: v.optional(v.id("orders")),
+    requestId: v.string(),
+    action: v.union(
+      v.literal("submit"),
+      v.literal("update_pending"),
+      v.literal("resubmit_rejected"),
+      v.literal("cancel")
+    ),
+    payloadHash: v.string(),
+    resultOrderId: v.id("orders"),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_attendeeId_and_requestId", ["attendeeId", "requestId"])
+    .index("by_expiresAt", ["expiresAt"]),
+  proofUploadClaims: defineTable({
+    eventId: v.id("events"),
+    attendeeId: v.id("eventAttendees"),
+    orderId: v.id("orders"),
+    uploaderUserId: v.string(),
+    contentType: v.string(),
+    size: v.number(),
+    sha256: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_eventId_and_attendeeId", ["eventId", "attendeeId"])
+    .index("by_expiresAt", ["expiresAt"]),
   eventInvitations: defineTable({
     eventId: v.id("events"),
     name: v.string(),

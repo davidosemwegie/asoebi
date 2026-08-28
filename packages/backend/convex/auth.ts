@@ -6,7 +6,7 @@ import { v } from "convex/values"
 
 import { components, internal } from "./_generated/api"
 import type { DataModel } from "./_generated/dataModel"
-import { env, query } from "./_generated/server"
+import { env, internalQuery, query } from "./_generated/server"
 import authConfig from "./auth.config"
 
 export const authComponent = createClient<DataModel>(components.betterAuth)
@@ -69,7 +69,7 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
         "asoebi-clearjar-studio.vercel.app",
         "asoebi-*-clearjar-studio.vercel.app",
       ],
-      fallback: env.SITE_URL,
+      fallback: env.SITE_URL ?? "http://localhost:3000",
       protocol: "auto",
     },
     secret: env.BETTER_AUTH_SECRET,
@@ -101,7 +101,9 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
       },
     },
     advanced: {
-      useSecureCookies: !env.SITE_URL.startsWith("http://"),
+      useSecureCookies: !(env.SITE_URL ?? "http://localhost:3000").startsWith(
+        "http://"
+      ),
     },
     plugins: [convex({ authConfig })],
   })
@@ -121,5 +123,24 @@ export const getCurrentUser = query({
       email: user.email,
       image: user.image ?? null,
     }
+  },
+})
+
+/** Internal, server-side user lookup for durable notification jobs. */
+export const getUserForNotification = internalQuery({
+  args: { userId: v.string() },
+  returns: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
+  handler: async (ctx, { userId }) => {
+    const user = await ctx.runQuery(components.betterAuth.adapter.findOne, {
+      model: "user",
+      where: [{ field: "_id", value: userId }],
+    })
+    if (
+      !user ||
+      typeof user.name !== "string" ||
+      typeof user.email !== "string"
+    )
+      return null
+    return { name: user.name, email: user.email }
   },
 })

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   useConvexAuth,
   useMutation,
@@ -12,7 +13,6 @@ import {
 } from "convex/react"
 import {
   CalendarDaysIcon,
-  CheckCircle2Icon,
   CircleAlertIcon,
   Clock3Icon,
   ContactIcon,
@@ -40,15 +40,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@workspace/ui/components/dialog"
 import {
   Empty,
   EmptyContent,
@@ -122,7 +113,7 @@ export function PublicEventLanding({
   const [isStarting, setIsStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const [hasJoined, setHasJoined] = useState(false)
-  const [confirmationOpen, setConfirmationOpen] = useState(false)
+  const router = useRouter()
   const { isAuthenticated, isLoading: authIsLoading } = useConvexAuth()
   const refreshedLanding = useQuery(
     api.sharedEvents.getLanding,
@@ -163,7 +154,7 @@ export function PublicEventLanding({
   const orderingOpen = landing.orderingOpen && !deadlineReached
   const orderDeadlineAt = landing.orderDeadlineAt
   const canStart = orderingOpen && availableItems.length > 0 && !hasJoined
-  const continuation = `/e/${shareToken}`
+  const continuation = `/e/${shareToken}/order/items`
   const coverSrc = landing.coverVersion
     ? `/e/${shareToken}/cover/v1/${landing.coverVersion}`
     : DEFAULT_BANNER
@@ -175,7 +166,7 @@ export function PublicEventLanding({
     try {
       await startCheckout({ shareToken })
       setHasJoined(true)
-      setConfirmationOpen(true)
+      router.push(continuation)
     } catch {
       const clientNow = Date.now()
       const authoritativeNow =
@@ -447,28 +438,6 @@ export function PublicEventLanding({
           </aside>
         </div>
       </div>
-
-      <Dialog open={confirmationOpen} onOpenChange={setConfirmationOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <div className="flex size-10 items-center justify-center rounded-lg bg-muted">
-              <CheckCircle2Icon aria-hidden="true" />
-            </div>
-            <DialogTitle className="text-xl">
-              You’re connected to this event
-            </DialogTitle>
-            <DialogDescription className="text-lg text-pretty">
-              Your account is linked to this event. No order has been submitted
-              yet.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button className="min-h-12 text-lg" />}>
-              Done
-            </DialogClose>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </main>
   )
 }

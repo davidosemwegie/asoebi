@@ -878,6 +878,42 @@ export const matchCheckoutStarted = internalMutation({
   },
 })
 
+// Invitations are outreach only. This projection is deliberately best-effort:
+// an unmatched attendee can always order, while a verified matching email gives
+// the organizer a monotonic activity signal without corrupting aggregates.
+export const markOrderSubmitted = internalMutation({
+  args: {
+    eventId: v.id("events"),
+    attendeeId: v.id("eventAttendees"),
+    userId: v.string(),
+    email: v.string(),
+    orderId: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const normalizedEmail = normalizeEmail(args.email)
+    const invitation = await ctx.db
+      .query("eventInvitations")
+      .withIndex("by_eventId_and_normalizedEmail", (q) =>
+        q.eq("eventId", args.eventId).eq("normalizedEmail", normalizedEmail)
+      )
+      .unique()
+    if (!invitation) return null
+    await replaceInvitation(ctx, invitation, {
+      matchedUserId: args.userId,
+      attendeeId: args.attendeeId,
+      orderId: args.orderId,
+      activity:
+        invitation.activity === "not_started" ||
+        invitation.activity === "checkout_started"
+          ? "order_submitted"
+          : invitation.activity,
+      updatedAt: Date.now(),
+    })
+    return null
+  },
+})
+
 export const cleanExpiredReceipts = internalMutation({
   args: {},
   returns: v.object({ importChunks: v.number(), sendRequests: v.number() }),
