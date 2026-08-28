@@ -120,4 +120,30 @@ describe("organizer CSV stream", () => {
     )
     expect(await response.text()).toContain("'=formula()")
   })
+
+  it("does not truncate more than one thousand logical export rows", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
+    vi.mocked(getToken).mockResolvedValue("owner-token")
+    let page = 0
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        const current = page++
+        return Promise.resolve(
+          Response.json({
+            rows: [{ ...row, reference: `ORDER-${current}` }],
+            continueCursor: current === 1000 ? null : `cursor-${current}`,
+            isDone: current === 1000,
+          })
+        )
+      })
+    )
+    const response = await GET(
+      new Request("http://localhost/api/events/event/orders.csv"),
+      { params: Promise.resolve({ eventId: "event" }) }
+    )
+    const csv = await response.text()
+    expect(csv).toContain("ORDER-1000")
+    expect(page).toBe(1001)
+  }, 15_000)
 })
