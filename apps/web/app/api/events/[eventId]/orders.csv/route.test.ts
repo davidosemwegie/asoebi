@@ -1,0 +1,123 @@
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+import { GET } from "./route"
+
+vi.mock("@/lib/auth-server", () => ({ getToken: vi.fn() }))
+import { getToken } from "@/lib/auth-server"
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
+  vi.mocked(getToken).mockReset()
+})
+
+const row = {
+  reference: "=formula()",
+  guestName: 'Ada, "A"',
+  guestEmail: "ada@example.com",
+  guestPhone: "",
+  item: "Lace",
+  quantity: 1,
+  unitPriceMinor: 1000,
+  lineTotalMinor: 1000,
+  orderTotalMinor: 1000,
+  currency: "NGN",
+  paymentStatus: "pending_review",
+  progress: "pending",
+  fulfillment: "Pickup",
+  fulfillmentType: "pickup",
+  submittedAt: 0,
+  reviewedAt: "",
+  fulfilledAt: "",
+  timeZone: "Africa/Lagos",
+}
+
+describe("organizer CSV stream", () => {
+  it("requires authentication", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
+    vi.mocked(getToken).mockResolvedValue(undefined)
+    expect(
+      (
+        await GET(new Request("http://localhost/api/events/event/orders.csv"), {
+          params: Promise.resolve({ eventId: "event" }),
+        })
+      ).status
+    ).toBe(404)
+  })
+
+  it("streams multiple owner-authorized pages with one BOM/header and safe quoted rows", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
+    vi.mocked(getToken).mockResolvedValue("owner-token")
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ rows: [row], continueCursor: "next", isDone: false })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          rows: [{ ...row, reference: "SECOND" }],
+          continueCursor: null,
+          isDone: true,
+        })
+      )
+    vi.stubGlobal("fetch", fetchMock)
+    const response = await GET(
+      new Request(
+        "http://localhost/api/events/event/orders.csv?itemId=item&fulfillmentType=pickup"
+      ),
+      { params: Promise.resolve({ eventId: "event" }) }
+    )
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    const csv = new TextDecoder().decode(bytes)
+    expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8")
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
+    expect(csv.match(/Order reference/g)).toHaveLength(1)
+    expect(csv).toContain("'=formula()")
+    expect(csv).toContain('"Ada, ""A"""')
+    expect(csv).toContain("SECOND")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual({
+      headers: { Authorization: "Bearer owner-token" },
+      cache: "no-store",
+    })
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("cursor=next")
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("itemId=item")
+  })
+
+  it("returns not found when the initial owner export request fails", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
+    vi.mocked(getToken).mockResolvedValue("owner-token")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("no", { status: 403 }))
+    )
+    expect(
+      (
+        await GET(new Request("http://localhost/api/events/event/orders.csv"), {
+          params: Promise.resolve({ eventId: "event" }),
+        })
+      ).status
+    ).toBe(404)
+  })
+
+  it("continues past a filter-empty source page", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
+    vi.mocked(getToken).mockResolvedValue("owner-token")
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ rows: [], continueCursor: "next", isDone: false })
+        )
+        .mockResolvedValueOnce(
+          Response.json({ rows: [row], continueCursor: null, isDone: true })
+        )
+    )
+    const response = await GET(
+      new Request("http://localhost/api/events/event/orders.csv?itemId=item"),
+      { params: Promise.resolve({ eventId: "event" }) }
+    )
+    expect(await response.text()).toContain("'=formula()")
+  })
+})

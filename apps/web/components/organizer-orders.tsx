@@ -5,7 +5,9 @@ import { useState } from "react"
 import { useQuery } from "convex/react"
 import { DownloadIcon, FilterIcon } from "lucide-react"
 import { useEventWorkspace } from "@/components/event-workspace"
+import { formatMoney } from "@/lib/money"
 import { api } from "@workspace/backend/convex/_generated/api"
+import type { Id } from "@workspace/backend/convex/_generated/dataModel"
 import { Button } from "@workspace/ui/components/button"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
@@ -33,25 +35,61 @@ import {
 } from "@workspace/ui/components/table"
 
 const pageSize = 20
+type PaymentStatus =
+  | "not_submitted"
+  | "pending_review"
+  | "confirmed"
+  | "rejected"
+type Progress =
+  | "pending"
+  | "preparing"
+  | "ready_for_pickup"
+  | "dispatched"
+  | "fulfilled"
+  | "cancelled"
+type OrderListEntry = {
+  _id: Id<"orders">
+  reference: string
+  guestName: string
+  totalMinor: number
+  currency: string
+  paymentStatus: PaymentStatus
+  progress: Progress
+}
 export function OrganizerOrders() {
   const event = useEventWorkspace()
   const [search, setSearch] = useState("")
-  const [paymentStatus, setPaymentStatus] = useState<string>()
-  const [progress, setProgress] = useState<string>()
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>()
+  const [progress, setProgress] = useState<Progress>()
+  const [itemId, setItemId] = useState<Id<"items">>()
+  const [fulfillmentOptionId, setFulfillmentOptionId] =
+    useState<Id<"fulfillmentOptions">>()
+  const [fulfillmentType, setFulfillmentType] = useState<
+    "pickup" | "delivery"
+  >()
   const [cursor, setCursor] = useState<string | null>(null)
   const [previous, setPrevious] = useState<(string | null)[]>([])
   const filters = {
     eventId: event._id,
     search: search || undefined,
-    paymentStatus: paymentStatus as any,
-    progress: progress as any,
+    paymentStatus,
+    progress,
+    itemId,
+    fulfillmentOptionId,
+    fulfillmentType,
     paginationOpts: { numItems: pageSize, cursor },
   }
-  const result = useQuery((api as any).organizerOrders.list, filters) as any
+  const result = useQuery(api.organizerOrders.list, filters)
+  const orders = (result?.page ?? []) as OrderListEntry[]
+  const items = useQuery(api.items.listForOwner, { eventId: event._id })
+  const options = event.fulfillmentOptions
   const query = new URLSearchParams()
   if (search) query.set("search", search)
   if (paymentStatus) query.set("paymentStatus", paymentStatus)
   if (progress) query.set("progress", progress)
+  if (itemId) query.set("itemId", itemId)
+  if (fulfillmentOptionId) query.set("fulfillmentOptionId", fulfillmentOptionId)
+  if (fulfillmentType) query.set("fulfillmentType", fulfillmentType)
   const controls = (
     <>
       <label className="sr-only" htmlFor="order-search">
@@ -71,7 +109,11 @@ export function OrganizerOrders() {
       <Select
         value={paymentStatus}
         onValueChange={(value) => {
-          setPaymentStatus(value === "all" || !value ? undefined : value)
+          setPaymentStatus(
+            !value || (value as string) === "all"
+              ? undefined
+              : (value as PaymentStatus)
+          )
           setCursor(null)
           setPrevious([])
         }}
@@ -89,9 +131,80 @@ export function OrganizerOrders() {
         </SelectContent>
       </Select>
       <Select
+        value={itemId}
+        onValueChange={(value) => {
+          setItemId(
+            value === "all" || !value ? undefined : (value as Id<"items">)
+          )
+          setCursor(null)
+          setPrevious([])
+        }}
+      >
+        <SelectTrigger className="min-h-12 text-base">
+          <SelectValue placeholder="Item" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All items</SelectItem>
+          {items?.map((item) => (
+            <SelectItem key={item._id} value={item._id}>
+              {item.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={fulfillmentType}
+        onValueChange={(value) => {
+          setFulfillmentType(
+            !value || (value as string) === "all"
+              ? undefined
+              : (value as "pickup" | "delivery")
+          )
+          setCursor(null)
+          setPrevious([])
+        }}
+      >
+        <SelectTrigger className="min-h-12 text-base">
+          <SelectValue placeholder="Pickup or delivery" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Pickup or delivery</SelectItem>
+          <SelectItem value="pickup">Pickup</SelectItem>
+          <SelectItem value="delivery">Delivery</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select
+        value={fulfillmentOptionId}
+        onValueChange={(value) => {
+          setFulfillmentOptionId(
+            value === "all" || !value
+              ? undefined
+              : (value as Id<"fulfillmentOptions">)
+          )
+          setCursor(null)
+          setPrevious([])
+        }}
+      >
+        <SelectTrigger className="min-h-12 text-base">
+          <SelectValue placeholder="Fulfillment option" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All fulfillment options</SelectItem>
+          {options?.map((option) => (
+            <SelectItem key={option._id} value={option._id}>
+              {option.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
         value={progress}
         onValueChange={(value) => {
-          setProgress(value === "all" || !value ? undefined : value)
+          setProgress(
+            !value || (value as string) === "all"
+              ? undefined
+              : (value as Progress)
+          )
           setCursor(null)
           setPrevious([])
         }}
@@ -150,7 +263,7 @@ export function OrganizerOrders() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {result?.page.map((order: any) => (
+            {orders.map((order) => (
               <TableRow key={order._id}>
                 <TableCell>{order.reference}</TableCell>
                 <TableCell>{order.guestName}</TableCell>
@@ -159,7 +272,10 @@ export function OrganizerOrders() {
                 </TableCell>
                 <TableCell>{order.progress.replaceAll("_", " ")}</TableCell>
                 <TableCell>
-                  {order.currency} {order.totalMinor.toLocaleString()}
+                  {formatMoney(
+                    order.totalMinor,
+                    order.currency || event.currency
+                  )}
                 </TableCell>
                 <TableCell>
                   <Button
@@ -178,7 +294,7 @@ export function OrganizerOrders() {
         </Table>
       </div>
       <div className="grid gap-3 md:hidden">
-        {result?.page.map((order: any) => (
+        {orders.map((order) => (
           <Card key={order._id}>
             <CardContent className="space-y-3 pt-5 text-base">
               <p className="font-semibold">{order.reference}</p>
@@ -198,6 +314,18 @@ export function OrganizerOrders() {
           </Card>
         ))}
       </div>
+      {result === undefined ? (
+        <p className="text-base" role="status">
+          Loading orders…
+        </p>
+      ) : result.page.length === 0 ? (
+        <Card>
+          <CardContent className="pt-5 text-base">
+            No orders match these filters. Change a filter or try a different
+            search.
+          </CardContent>
+        </Card>
+      ) : null}
       <div className="flex justify-between gap-3">
         <Button
           variant="outline"
@@ -215,6 +343,7 @@ export function OrganizerOrders() {
           className="min-h-12"
           disabled={!result?.continueCursor}
           onClick={() => {
+            if (!result?.continueCursor) return
             setPrevious([...previous, cursor])
             setCursor(result.continueCursor)
           }}

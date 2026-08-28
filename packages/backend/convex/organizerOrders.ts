@@ -2,6 +2,11 @@ import { ConvexError, v } from "convex/values"
 import { paginationOptsValidator } from "convex/server"
 
 import { requireOwnedEvent } from "./eventModel"
+import {
+  invitationActivityCounts,
+  invitationDeliveryCounts,
+} from "./eventInvitationAggregates"
+import { projectOrderCompletion } from "./eventInvitations"
 import { createNotification } from "./notifications"
 import { appendOrderHistory, releaseReservation } from "./orderModel"
 import {
@@ -21,11 +26,8 @@ import {
   query,
   env,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server"
-
-const internalOrganizer = internal as unknown as {
-  organizerOrders: { notifyLifecycle: any }
-}
 
 const statusFilter = v.optional(
   v.union(
@@ -52,19 +54,70 @@ const listArgs = {
   itemId: v.optional(v.id("items")),
   paymentStatus: statusFilter,
   progress: progressFilter,
+  fulfillmentType: v.optional(
+    v.union(v.literal("pickup"), v.literal("delivery"))
+  ),
   fulfillmentOptionId: v.optional(v.id("fulfillmentOptions")),
 }
 
-function paymentBounds(paymentStatus: string) {
+const orderHistoryResult = v.object({
+  _id: v.id("orderStatusHistory"),
+  _creationTime: v.number(),
+  orderId: v.id("orders"),
+  eventId: v.id("events"),
+  actorUserId: v.string(),
+  actorRole: v.union(
+    v.literal("guest"),
+    v.literal("organizer"),
+    v.literal("system")
+  ),
+  previousLifecycle: v.union(
+    v.literal("draft"),
+    v.literal("submitted"),
+    v.literal("cancelled")
+  ),
+  lifecycle: v.union(
+    v.literal("draft"),
+    v.literal("submitted"),
+    v.literal("cancelled")
+  ),
+  previousPaymentStatus: v.union(
+    v.literal("not_submitted"),
+    v.literal("pending_review"),
+    v.literal("confirmed"),
+    v.literal("rejected")
+  ),
+  paymentStatus: v.union(
+    v.literal("not_submitted"),
+    v.literal("pending_review"),
+    v.literal("confirmed"),
+    v.literal("rejected")
+  ),
+  previousProgress: progressFilter,
+  progress: progressFilter,
+  note: v.optional(v.string()),
+  createdAt: v.number(),
+})
+
+function submittedPaymentBounds(paymentStatus: string) {
+  const key: [string, string] = ["submitted", paymentStatus]
   return {
-    lower: { key: paymentStatus, inclusive: true },
-    upper: { key: paymentStatus, inclusive: true },
+    lower: { key, inclusive: true },
+    upper: { key, inclusive: true },
   }
 }
-function progressBounds(progress: string) {
+function submittedProgressBounds(progress: string) {
+  const key: [string, string, string] = ["submitted", "confirmed", progress]
   return {
-    lower: { key: progress, inclusive: true },
-    upper: { key: progress, inclusive: true },
+    lower: { key, inclusive: true },
+    upper: { key, inclusive: true },
+  }
+}
+
+function invitationBounds(value: string) {
+  return {
+    lower: { key: value, inclusive: true },
+    upper: { key: value, inclusive: true },
   }
 }
 
@@ -92,7 +145,10 @@ function summaryOrder(order: Doc<"orders">) {
     reference: order.reference,
     guestName: order.guestName ?? "Guest",
     guestEmail: order.guestEmail,
+    guestPhone: order.guestPhone,
     totalMinor: order.totalMinor,
+    itemSubtotalMinor: order.itemSubtotalMinor,
+    fulfillmentFeeMinor: order.fulfillmentFeeMinor,
     currency: order.currency ?? "",
     paymentStatus: order.paymentStatus,
     progress: order.progress,
@@ -102,80 +158,117 @@ function summaryOrder(order: Doc<"orders">) {
   }
 }
 
-async function listOrders(ctx: any, args: any) {
+type OrderListArgs = {
+  eventId: Id<"events">
+  paginationOpts: { numItems: number; cursor: string | null }
+  search?: string
+  itemId?: Id<"items">
+  paymentStatus?: Doc<"orders">["paymentStatus"]
+  progress?: Doc<"orders">["progress"]
+  fulfillmentType?: "pickup" | "delivery"
+  fulfillmentOptionId?: Id<"fulfillmentOptions">
+}
+
+type OrderListCursor = { sourceCursor: string | null; pending: string[] }
+
+function decodeOrderListCursor(cursor: string | null): OrderListCursor {
+  if (!cursor) return { sourceCursor: null, pending: [] }
+  try {
+    const decoded = JSON.parse(atob(cursor)) as unknown
+    if (
+      typeof decoded !== "object" ||
+      decoded === null ||
+      !("sourceCursor" in decoded) ||
+      !("pending" in decoded) ||
+      !Array.isArray(decoded.pending) ||
+      !decoded.pending.every((id) => typeof id === "string") ||
+      (decoded.sourceCursor !== null &&
+        typeof decoded.sourceCursor !== "string")
+    )
+      throw new Error("invalid")
+    return decoded as OrderListCursor
+  } catch {
+    throw new ConvexError("This order list page has expired. Refresh the list.")
+  }
+}
+
+function encodeOrderListCursor(cursor: OrderListCursor) {
+  return btoa(JSON.stringify(cursor))
+}
+
+async function matchesOrderFilters(
+  ctx: QueryCtx,
+  order: Doc<"orders">,
+  args: Pick<
+    OrderListArgs,
+    | "itemId"
+    | "paymentStatus"
+    | "progress"
+    | "fulfillmentType"
+    | "fulfillmentOptionId"
+  >,
+  search: string | undefined
+) {
+  if (order.lifecycle !== "submitted") return false
+  if (search && !order.searchText.includes(search)) return false
+  if (args.paymentStatus && order.paymentStatus !== args.paymentStatus)
+    return false
+  if (args.progress && order.progress !== args.progress) return false
+  if (
+    args.fulfillmentOptionId &&
+    order.fulfillmentOptionId !== args.fulfillmentOptionId
+  )
+    return false
+  if (args.fulfillmentType && order.fulfillmentType !== args.fulfillmentType)
+    return false
+  if (!args.itemId) return true
+  const lines = await ctx.db
+    .query("orderLines")
+    .withIndex("by_orderId", (q) => q.eq("orderId", order._id))
+    .take(100)
+  return lines.some((line) => line.itemId === args.itemId)
+}
+
+async function listOrders(ctx: QueryCtx, args: OrderListArgs) {
   await requireOwnedEvent(ctx, args.eventId)
   const search = args.search?.trim().toLowerCase()
   if (search && search.length > 120)
     throw new ConvexError("Search is too long.")
-  let result: any
-  if (search) {
-    result = await ctx.db
+  const requested = Math.min(Math.max(args.paginationOpts.numItems, 1), 50)
+  const cursor = decodeOrderListCursor(args.paginationOpts.cursor)
+  const page: Doc<"orders">[] = []
+  const pending = [...cursor.pending]
+  let sourceCursor = cursor.sourceCursor
+  while (pending.length > 0 && page.length < requested) {
+    const order = await ctx.db.get(pending.shift() as Id<"orders">)
+    if (order && (await matchesOrderFilters(ctx, order, args, search)))
+      page.push(order)
+  }
+  let isDone = false
+  while (page.length < requested && !isDone) {
+    const candidates = await ctx.db
       .query("orders")
-      .withSearchIndex("search_eventId_and_text", (q: any) => {
-        let indexed = q.search("searchText", search).eq("eventId", args.eventId)
-        if (args.paymentStatus)
-          indexed = indexed.eq("paymentStatus", args.paymentStatus)
-        if (args.progress) indexed = indexed.eq("progress", args.progress)
-        return indexed.eq("lifecycle", "submitted")
-      })
-      .paginate(args.paginationOpts)
-  } else if (args.paymentStatus) {
-    result = await ctx.db
-      .query("orders")
-      .withIndex("by_eventId_and_paymentStatus_and_updatedAt", (q: any) =>
-        q.eq("eventId", args.eventId).eq("paymentStatus", args.paymentStatus)
-      )
-      .order("desc")
-      .paginate(args.paginationOpts)
-  } else if (args.progress) {
-    result = await ctx.db
-      .query("orders")
-      .withIndex("by_eventId_and_progress_and_updatedAt", (q: any) =>
-        q.eq("eventId", args.eventId).eq("progress", args.progress)
-      )
-      .order("desc")
-      .paginate(args.paginationOpts)
-  } else if (args.fulfillmentOptionId) {
-    result = await ctx.db
-      .query("orders")
-      .withIndex("by_eventId_and_fulfillmentOptionId_and_updatedAt", (q: any) =>
-        q
-          .eq("eventId", args.eventId)
-          .eq("fulfillmentOptionId", args.fulfillmentOptionId)
-      )
-      .order("desc")
-      .paginate(args.paginationOpts)
-  } else {
-    result = await ctx.db
-      .query("orders")
-      .withIndex("by_eventId_and_lifecycle_and_updatedAt", (q: any) =>
+      .withIndex("by_eventId_and_lifecycle_and_updatedAt", (q) =>
         q.eq("eventId", args.eventId).eq("lifecycle", "submitted")
       )
       .order("desc")
-      .paginate(args.paginationOpts)
+      .paginate({ cursor: sourceCursor, numItems: 50 })
+    sourceCursor = candidates.continueCursor
+    isDone = candidates.isDone
+    for (const order of candidates.page) {
+      if (!(await matchesOrderFilters(ctx, order, args, search))) continue
+      if (page.length < requested) page.push(order)
+      else pending.push(`${order._id}`)
+    }
   }
-  let page = result.page.filter(
-    (order: Doc<"orders">) => order.lifecycle === "submitted"
-  )
-  if (args.fulfillmentOptionId)
-    page = page.filter(
-      (order: Doc<"orders">) =>
-        order.fulfillmentOptionId === args.fulfillmentOptionId
-    )
-  if (args.itemId) {
-    const matches = await Promise.all(
-      page.map(async (order: Doc<"orders">) =>
-        (
-          await ctx.db
-            .query("orderLines")
-            .withIndex("by_orderId", (q: any) => q.eq("orderId", order._id))
-            .take(100)
-        ).some((line: Doc<"orderLines">) => line.itemId === args.itemId)
-      )
-    )
-    page = page.filter((_order: Doc<"orders">, index: number) => matches[index])
+  const resultIsDone = isDone && pending.length === 0
+  return {
+    page: page.map(summaryOrder),
+    isDone: resultIsDone,
+    continueCursor: resultIsDone
+      ? ""
+      : encodeOrderListCursor({ sourceCursor, pending }),
   }
-  return { ...result, page: page.map(summaryOrder) }
 }
 
 export const list = query({
@@ -189,32 +282,84 @@ export const getSummary = query({
   returns: v.any(),
   handler: async (ctx, { eventId }) => {
     const event = await requireOwnedEvent(ctx, eventId)
-    const [submitted, value, needsPaymentCheck, completed, items] =
-      await Promise.all([
-        orderValues.count(ctx, {
-          namespace: eventId,
-          bounds: paymentBounds("submitted"),
-        }),
-        orderValues.sum(ctx, { namespace: eventId }),
-        orderPaymentCounts.count(ctx, {
-          namespace: eventId,
-          bounds: paymentBounds("pending_review"),
-        }),
-        orderProgressCounts.count(ctx, {
-          namespace: eventId,
-          bounds: progressBounds("fulfilled"),
-        }),
-        ctx.db
-          .query("items")
-          .withIndex("by_eventId_and_sortOrder", (q) =>
-            q.eq("eventId", eventId)
-          )
-          .take(100),
-      ])
-    const invitationRows = await ctx.db
-      .query("eventInvitations")
-      .withIndex("by_eventId_and_createdAt", (q) => q.eq("eventId", eventId))
-      .take(1000)
+    const [
+      submitted,
+      value,
+      needsPaymentCheck,
+      completed,
+      confirmedAwaitingPreparation,
+      items,
+      notSent,
+      queued,
+      sent,
+      delivered,
+      delayed,
+      failed,
+      suppressed,
+      ordersSubmitted,
+      ordersCompleted,
+    ] = await Promise.all([
+      orderValues.count(ctx, {
+        namespace: eventId,
+        bounds: {
+          lower: { key: "submitted", inclusive: true },
+          upper: { key: "submitted", inclusive: true },
+        },
+      }),
+      orderValues.sum(ctx, { namespace: eventId }),
+      orderPaymentCounts.count(ctx, {
+        namespace: eventId,
+        bounds: submittedPaymentBounds("pending_review"),
+      }),
+      orderProgressCounts.count(ctx, {
+        namespace: eventId,
+        bounds: submittedProgressBounds("fulfilled"),
+      }),
+      orderProgressCounts.count(ctx, {
+        namespace: eventId,
+        bounds: submittedProgressBounds("pending"),
+      }),
+      ctx.db
+        .query("items")
+        .withIndex("by_eventId_and_sortOrder", (q) => q.eq("eventId", eventId))
+        .take(100),
+      invitationDeliveryCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("not_sent"),
+      }),
+      invitationDeliveryCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("queued"),
+      }),
+      invitationDeliveryCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("sent"),
+      }),
+      invitationDeliveryCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("delivered"),
+      }),
+      invitationDeliveryCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("delayed"),
+      }),
+      invitationDeliveryCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("failed"),
+      }),
+      invitationDeliveryCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("suppressed"),
+      }),
+      invitationActivityCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("order_submitted"),
+      }),
+      invitationActivityCounts.count(ctx, {
+        namespace: eventId,
+        bounds: invitationBounds("order_completed"),
+      }),
+    ])
     const demand = await Promise.all(
       items.map(async (item) => ({
         item,
@@ -234,13 +379,8 @@ export const getSummary = query({
       currentOrderValueMinor: value,
       paymentsNeedingReview: needsPaymentCheck,
       completedOrders: completed,
-      needsAttention:
-        needsPaymentCheck +
-        invitationRows.filter(
-          (row) =>
-            row.latestDeliveryState === "failed" ||
-            row.latestDeliveryState === "delayed"
-        ).length,
+      confirmedAwaitingPreparation,
+      needsAttention: needsPaymentCheck + delayed + failed + suppressed,
       items: demand.map(({ item, requested }) => ({
         itemId: item._id,
         name: item.name,
@@ -249,17 +389,18 @@ export const getSummary = query({
         available: Math.max(0, item.inventoryTotal - item.reservedQuantity),
       })),
       invitations: {
-        total: invitationRows.length,
-        sent: invitationRows.filter(
-          (row) =>
-            row.latestDeliveryState === "sent" ||
-            row.latestDeliveryState === "delivered"
-        ).length,
-        needsAttention: invitationRows.filter(
-          (row) =>
-            row.latestDeliveryState === "failed" ||
-            row.latestDeliveryState === "delayed"
-        ).length,
+        total:
+          notSent + queued + sent + delivered + delayed + failed + suppressed,
+        notSent,
+        queued,
+        sent,
+        delivered,
+        delayed,
+        failed,
+        suppressed,
+        needsAttention: delayed + failed + suppressed,
+        ordersSubmitted,
+        ordersCompleted,
       },
     }
   },
@@ -272,7 +413,7 @@ export const getDetail = query({
     await requireOwnedEvent(ctx, args.eventId)
     const order = await ctx.db.get(args.orderId)
     if (!order || order.eventId !== args.eventId) return null
-    const [lines, history, proof, notifications] = await Promise.all([
+    const [lines, history, proof] = await Promise.all([
       ctx.db
         .query("orderLines")
         .withIndex("by_orderId", (q) => q.eq("orderId", order._id))
@@ -285,12 +426,6 @@ export const getDetail = query({
         .order("desc")
         .take(50),
       order.currentProofId ? ctx.db.get(order.currentProofId) : null,
-      ctx.db
-        .query("notifications")
-        .withIndex("by_orderRef_and_updatedAt", (q) =>
-          q.eq("orderRef", `${order._id}`)
-        )
-        .take(50),
     ])
     return {
       order: summaryOrder(order),
@@ -298,19 +433,45 @@ export const getDetail = query({
       history,
       receiptAvailable: Boolean(proof?.status === "active"),
       fulfillmentDetails: order.fulfillmentDetails,
+      fulfillmentOptionName: order.fulfillmentOptionName,
+      fulfillmentType: order.fulfillmentType,
       fulfillmentInstructions: order.fulfillmentInstructions,
-      notifications: notifications.map((notification) => ({
-        _id: notification._id,
-        subject: notification.subject,
-        status: notification.status,
-        createdAt: notification.createdAt,
-      })),
     }
+  },
+})
+
+export const listHistory = query({
+  args: {
+    eventId: v.id("events"),
+    orderId: v.id("orders"),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: v.object({
+    page: v.array(orderHistoryResult),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+    splitCursor: v.optional(v.union(v.string(), v.null())),
+  }),
+  handler: async (ctx, args) => {
+    const event = await requireOwnedEvent(ctx, args.eventId)
+    const order = await ctx.db.get(args.orderId)
+    if (!order || order.eventId !== event._id)
+      return {
+        page: [],
+        isDone: true,
+        continueCursor: "",
+      }
+    return await ctx.db
+      .query("orderStatusHistory")
+      .withIndex("by_orderId_and_createdAt", (q) => q.eq("orderId", order._id))
+      .order("desc")
+      .paginate(args.paginationOpts)
   },
 })
 
 /** Private export projection. The HTTP action carries the caller's identity, so
  * this repeats ownership verification rather than trusting a route parameter. */
+/** Legacy single-page projection retained only for internal compatibility. */
 export const getExportRows = internalQuery({
   args: {
     eventId: v.id("events"),
@@ -318,6 +479,9 @@ export const getExportRows = internalQuery({
     paymentStatus: statusFilter,
     progress: progressFilter,
     fulfillmentOptionId: v.optional(v.id("fulfillmentOptions")),
+    fulfillmentType: v.optional(
+      v.union(v.literal("pickup"), v.literal("delivery"))
+    ),
     itemId: v.optional(v.id("items")),
   },
   returns: v.any(),
@@ -336,7 +500,9 @@ export const getExportRows = internalQuery({
         (!args.paymentStatus || order.paymentStatus === args.paymentStatus) &&
         (!args.progress || order.progress === args.progress) &&
         (!args.fulfillmentOptionId ||
-          order.fulfillmentOptionId === args.fulfillmentOptionId)
+          order.fulfillmentOptionId === args.fulfillmentOptionId) &&
+        (!args.fulfillmentType ||
+          order.fulfillmentType === args.fulfillmentType)
     )
     const rows: any[] = []
     for (const order of orders) {
@@ -369,6 +535,64 @@ export const getExportRows = internalQuery({
       }
     }
     return rows
+  },
+})
+
+export const getExportPage = internalQuery({
+  args: {
+    eventId: v.id("events"),
+    cursor: v.union(v.string(), v.null()),
+    search: v.optional(v.string()),
+    paymentStatus: statusFilter,
+    progress: progressFilter,
+    fulfillmentOptionId: v.optional(v.id("fulfillmentOptions")),
+    fulfillmentType: v.optional(
+      v.union(v.literal("pickup"), v.literal("delivery"))
+    ),
+    itemId: v.optional(v.id("items")),
+  },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const event = await requireOwnedEvent(ctx, args.eventId)
+    const page = await ctx.db
+      .query("orders")
+      .withIndex("by_eventId_and_lifecycle_and_updatedAt", (q) =>
+        q.eq("eventId", event._id).eq("lifecycle", "submitted")
+      )
+      .order("desc")
+      .paginate({ numItems: 25, cursor: args.cursor })
+    const search = args.search?.trim().toLowerCase()
+    const rows: any[] = []
+    for (const order of page.page) {
+      if (!(await matchesOrderFilters(ctx, order, args, search))) continue
+      const lines = await ctx.db
+        .query("orderLines")
+        .withIndex("by_orderId", (q) => q.eq("orderId", order._id))
+        .take(100)
+      for (const line of lines)
+        if (!args.itemId || line.itemId === args.itemId)
+          rows.push({
+            reference: order.reference,
+            guestName: order.guestName ?? "",
+            guestEmail: order.guestEmail ?? "",
+            guestPhone: order.guestPhone ?? "",
+            item: line.itemName,
+            quantity: line.quantity,
+            unitPriceMinor: line.unitPriceMinor,
+            lineTotalMinor: line.lineTotalMinor,
+            orderTotalMinor: order.totalMinor,
+            currency: order.currency ?? "",
+            paymentStatus: order.paymentStatus,
+            progress: order.progress,
+            fulfillment: order.fulfillmentOptionName ?? "",
+            fulfillmentType: order.fulfillmentType ?? "",
+            submittedAt: order.submittedAt ?? order.createdAt,
+            reviewedAt: order.reviewedAt ?? "",
+            fulfilledAt: order.progress === "fulfilled" ? order.updatedAt : "",
+            timeZone: event.timeZone ?? "UTC",
+          })
+    }
+    return { rows, continueCursor: page.continueCursor, isDone: page.isDone }
   },
 })
 
@@ -437,17 +661,13 @@ export const decidePayment = mutation({
       paymentStatus: args.decision,
       note: args.note,
     })
-    await ctx.scheduler.runAfter(
-      0,
-      internalOrganizer.organizerOrders.notifyLifecycle,
-      {
-        orderId: updated._id,
-        kind:
-          args.decision === "confirmed"
-            ? "payment_confirmed"
-            : "payment_rejected",
-      }
-    )
+    await ctx.scheduler.runAfter(0, internal.organizerOrders.notifyLifecycle, {
+      orderId: updated._id,
+      kind:
+        args.decision === "confirmed"
+          ? "payment_confirmed"
+          : "payment_rejected",
+    })
     return null
   },
 })
@@ -496,6 +716,13 @@ export const advanceFulfillment = mutation({
       actorRole: "organizer",
       progress: next,
     })
+    if (next === "fulfilled") {
+      await projectOrderCompletion(ctx, {
+        eventId: event._id,
+        email: updated.guestEmail,
+        orderId: updated._id,
+      })
+    }
     const kind =
       next === "preparing"
         ? "preparing"
@@ -504,11 +731,10 @@ export const advanceFulfillment = mutation({
           : next === "dispatched"
             ? "sent_for_delivery"
             : "completed"
-    await ctx.scheduler.runAfter(
-      0,
-      internalOrganizer.organizerOrders.notifyLifecycle,
-      { orderId: updated._id, kind }
-    )
+    await ctx.scheduler.runAfter(0, internal.organizerOrders.notifyLifecycle, {
+      orderId: updated._id,
+      kind,
+    })
     return null
   },
 })
@@ -549,11 +775,10 @@ export const cancel = mutation({
       progress: "cancelled",
       note: args.note,
     })
-    await ctx.scheduler.runAfter(
-      0,
-      internalOrganizer.organizerOrders.notifyLifecycle,
-      { orderId: updated._id, kind: "organizer_cancelled" }
-    )
+    await ctx.scheduler.runAfter(0, internal.organizerOrders.notifyLifecycle, {
+      orderId: updated._id,
+      kind: "organizer_cancelled",
+    })
     return null
   },
 })

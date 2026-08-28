@@ -12,6 +12,22 @@ const http = httpRouter()
 const PUBLIC_EVENT_COVER_PREFIX = "/public-event-cover/v1/"
 const PRIVATE_ORDER_RECEIPT_PREFIX = "/private-order-receipt/v1/"
 const PRIVATE_ORDER_EXPORT_PREFIX = "/private-order-export/v1/"
+const PRIVATE_ORDER_EXPORT_STREAM_PREFIX = "/private-order-export/v2/"
+const paymentStatuses = [
+  "not_submitted",
+  "pending_review",
+  "confirmed",
+  "rejected",
+] as const
+const progressStatuses = [
+  "pending",
+  "preparing",
+  "ready_for_pickup",
+  "dispatched",
+  "fulfilled",
+  "cancelled",
+] as const
+const fulfillmentTypes = ["pickup", "delivery"] as const
 const internalOrders = internal as unknown as {
   orders: {
     getReceiptForOwner: FunctionReference<
@@ -25,9 +41,21 @@ const internalOrders = internal as unknown as {
       } | null
     >
   }
-  organizerOrders: {
-    getExportRows: FunctionReference<"query", "internal", any, any>
-  }
+}
+
+function enumParam<const T extends readonly string[]>(
+  value: string | null,
+  allowed: T
+): T[number] | undefined {
+  return value && allowed.includes(value) ? (value as T[number]) : undefined
+}
+
+function idParam<TableName extends "items" | "fulfillmentOptions">(
+  value: string | null
+): Id<TableName> | undefined {
+  return value && /^[A-Za-z0-9]{1,128}$/.test(value)
+    ? (value as Id<TableName>)
+    : undefined
 }
 
 authComponent.registerRoutes(http, createAuth)
@@ -70,6 +98,44 @@ http.route({
 })
 
 http.route({
+  pathPrefix: PRIVATE_ORDER_EXPORT_STREAM_PREFIX,
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url)
+    const eventId = url.pathname.slice(
+      PRIVATE_ORDER_EXPORT_STREAM_PREFIX.length
+    )
+    if (!eventId || eventId.includes("/"))
+      return new Response("Not found", { status: 404 })
+    try {
+      const page = await ctx.runQuery(internal.organizerOrders.getExportPage, {
+        eventId: eventId as Id<"events">,
+        cursor: url.searchParams.get("cursor"),
+        search: url.searchParams.get("search") || undefined,
+        paymentStatus: enumParam(
+          url.searchParams.get("paymentStatus"),
+          paymentStatuses
+        ),
+        progress: enumParam(url.searchParams.get("progress"), progressStatuses),
+        fulfillmentOptionId: idParam<"fulfillmentOptions">(
+          url.searchParams.get("fulfillmentOptionId")
+        ),
+        fulfillmentType: enumParam(
+          url.searchParams.get("fulfillmentType"),
+          fulfillmentTypes
+        ),
+        itemId: idParam<"items">(url.searchParams.get("itemId")),
+      })
+      return Response.json(page, {
+        headers: { "Cache-Control": "private, no-store" },
+      })
+    } catch {
+      return new Response("Not found", { status: 404 })
+    }
+  }),
+})
+
+http.route({
   pathPrefix: PRIVATE_ORDER_EXPORT_PREFIX,
   method: "GET",
   handler: httpAction(async (ctx, request) => {
@@ -78,18 +144,23 @@ http.route({
     if (!eventId || eventId.includes("/"))
       return new Response("Not found", { status: 404 })
     try {
-      const rows = await ctx.runQuery(
-        internalOrders.organizerOrders.getExportRows,
-        {
-          eventId: eventId as Id<"events">,
-          search: url.searchParams.get("search") || undefined,
-          paymentStatus: url.searchParams.get("paymentStatus") || undefined,
-          progress: url.searchParams.get("progress") || undefined,
-          fulfillmentOptionId:
-            url.searchParams.get("fulfillmentOptionId") || undefined,
-          itemId: url.searchParams.get("itemId") || undefined,
-        }
-      )
+      const rows = await ctx.runQuery(internal.organizerOrders.getExportRows, {
+        eventId: eventId as Id<"events">,
+        search: url.searchParams.get("search") || undefined,
+        paymentStatus: enumParam(
+          url.searchParams.get("paymentStatus"),
+          paymentStatuses
+        ),
+        progress: enumParam(url.searchParams.get("progress"), progressStatuses),
+        fulfillmentOptionId: idParam<"fulfillmentOptions">(
+          url.searchParams.get("fulfillmentOptionId")
+        ),
+        fulfillmentType: enumParam(
+          url.searchParams.get("fulfillmentType"),
+          fulfillmentTypes
+        ),
+        itemId: idParam<"items">(url.searchParams.get("itemId")),
+      })
       return Response.json(rows, {
         headers: { "Cache-Control": "private, no-store" },
       })

@@ -66,3 +66,33 @@ export function createOrderCsv(rows: Array<Record<string, unknown>>) {
   )
   return `\uFEFF${[headers.map(safeCell).join(","), ...lines].join("\r\n")}\r\n`
 }
+
+export function orderCsvHeader() {
+  return `\uFEFF${["Order reference", "Guest", "Email", "Phone", "Item", "Quantity", "Unit price", "Line total", "Order total", "Currency", "Payment status", "Progress", "Pickup or delivery", "Fulfillment option", "Submitted", "Payment decision", "Completed"].map(safeCell).join(",")}\r\n`
+}
+
+export function orderCsvRow(row: Record<string, unknown>) {
+  return (
+    [
+      row.reference,
+      row.guestName,
+      row.guestEmail,
+      row.guestPhone,
+      row.item,
+      row.quantity,
+      row.unitPriceMinor,
+      row.lineTotalMinor,
+      row.orderTotalMinor,
+      row.currency,
+      row.paymentStatus,
+      row.progress,
+      row.fulfillmentType,
+      row.fulfillment,
+      formatEventTime(row.submittedAt, String(row.timeZone)),
+      formatEventTime(row.reviewedAt, String(row.timeZone)),
+      formatEventTime(row.fulfilledAt, String(row.timeZone)),
+    ]
+      .map(safeCell)
+      .join(",") + "\r\n"
+  )
+}

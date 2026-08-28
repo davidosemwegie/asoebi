@@ -1,4 +1,4 @@
-import { createOrderCsv } from "@/lib/order-csv"
+import { orderCsvHeader, orderCsvRow } from "../../../../../lib/order-csv"
 
 const EVENT_ID_PATTERN = /^[A-Za-z0-9]{1,128}$/
 const FILTERS = [
@@ -6,6 +6,7 @@ const FILTERS = [
   "paymentStatus",
   "progress",
   "fulfillmentOptionId",
+  "fulfillmentType",
   "itemId",
 ] as const
 
@@ -26,19 +27,75 @@ export async function GET(
     if (value) filters.set(filter, value.slice(0, 160))
   }
   try {
-    const upstream = await fetch(
-      `${convexSiteUrl}/private-order-export/v1/${encodeURIComponent(eventId)}?${filters}`,
-      { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }
-    )
+    const endpoint = `${convexSiteUrl}/private-order-export/v2/${encodeURIComponent(eventId)}`
+    const upstream = await fetch(`${endpoint}?${filters}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    })
     if (!upstream.ok) return new Response("Not found", { status: 404 })
-    const rows = await upstream.json()
-    if (!Array.isArray(rows)) return new Response("Not found", { status: 404 })
+    const firstPage = await upstream.json()
+    if (
+      !firstPage ||
+      !Array.isArray(firstPage.rows) ||
+      typeof firstPage.isDone !== "boolean"
+    )
+      return new Response("Not found", { status: 404 })
     const encoder = new TextEncoder()
-    const csv = createOrderCsv(rows)
+    let page = firstPage as {
+      rows: Array<Record<string, unknown>>
+      continueCursor: string | null
+      isDone: boolean
+    }
+    let emittedHeader = false
+    let rowIndex = 0
     const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(csv))
-        controller.close()
+      async pull(controller) {
+        try {
+          if (!emittedHeader) {
+            controller.enqueue(encoder.encode(orderCsvHeader()))
+            emittedHeader = true
+          }
+          if (rowIndex < page.rows.length) {
+            controller.enqueue(
+              encoder.encode(orderCsvRow(page.rows[rowIndex]!))
+            )
+            rowIndex += 1
+            return
+          }
+          if (page.isDone || !page.continueCursor) {
+            controller.close()
+            return
+          }
+          filters.set("cursor", page.continueCursor)
+          const next = await fetch(`${endpoint}?${filters}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: "no-store",
+          })
+          if (!next.ok) throw new Error("Export page unavailable")
+          const nextPage = await next.json()
+          if (
+            !nextPage ||
+            !Array.isArray(nextPage.rows) ||
+            typeof nextPage.isDone !== "boolean"
+          )
+            throw new Error("Invalid export page")
+          page = nextPage
+          rowIndex = 0
+          if (page.rows.length > 0) {
+            controller.enqueue(encoder.encode(orderCsvRow(page.rows[0]!)))
+            rowIndex = 1
+            return
+          }
+          if (page.isDone || !page.continueCursor) {
+            controller.close()
+            return
+          }
+          // Keep the readable stream pulling through a filter-empty source
+          // page without adding a CSV record or buffering another page.
+          controller.enqueue(new Uint8Array())
+        } catch (error) {
+          controller.error(error)
+        }
       },
     })
     return new Response(stream, {

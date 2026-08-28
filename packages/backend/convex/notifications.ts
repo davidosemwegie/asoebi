@@ -4,8 +4,13 @@ import {
   type EmailId,
 } from "@convex-dev/resend"
 import { ConvexError, v } from "convex/values"
+import {
+  paginationOptsValidator,
+  paginationResultValidator,
+} from "convex/server"
 
 import { authComponent } from "./auth"
+import { requireOwnedEvent } from "./eventModel"
 import {
   deliveryStatus,
   notificationStatus,
@@ -46,6 +51,16 @@ const enqueueArgs = {
   payloadExpiresAt: v.optional(v.number()),
   template: notificationTemplate,
 }
+
+const orderNotificationResult = v.object({
+  _id: v.id("notifications"),
+  subject: v.string(),
+  status: notificationStatus,
+  latestAttemptNumber: v.number(),
+  retryBlockedReason: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
 
 function normalizeEmail(value: string) {
   const email = value.trim().toLowerCase()
@@ -407,6 +422,47 @@ export const getMine = query({
         createdAt: delivery.createdAt,
         updatedAt: delivery.updatedAt,
       })),
+    }
+  },
+})
+
+/** Owner-scoped, cursor-paginated notification history for one organizer order. */
+export const listOrderHistory = query({
+  args: {
+    eventId: v.id("events"),
+    orderId: v.id("orders"),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: paginationResultValidator(orderNotificationResult),
+  handler: async (ctx, args) => {
+    const event = await requireOwnedEvent(ctx, args.eventId)
+    const order = await ctx.db.get(args.orderId)
+    if (!order || order.eventId !== event._id)
+      throw new ConvexError("Order not found.")
+    const page = await ctx.db
+      .query("notifications")
+      .withIndex("by_orderRef_and_updatedAt", (q) =>
+        q.eq("orderRef", `${order._id}`)
+      )
+      .order("desc")
+      .paginate(args.paginationOpts)
+    return {
+      ...page,
+      page: page.page
+        .filter(
+          (notification) =>
+            notification.ownerId === event.ownerId &&
+            notification.eventRef === `${event._id}`
+        )
+        .map((notification) => ({
+          _id: notification._id,
+          subject: notification.subject,
+          status: notification.status,
+          latestAttemptNumber: notification.latestAttemptNumber,
+          retryBlockedReason: notification.retryBlockedReason,
+          createdAt: notification.createdAt,
+          updatedAt: notification.updatedAt,
+        })),
     }
   },
 })

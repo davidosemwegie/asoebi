@@ -5,6 +5,7 @@ import { CircleAlertIcon, PackageCheckIcon } from "lucide-react"
 
 import { EventDetails } from "@/components/event-details"
 import { useEventWorkspace } from "@/components/event-workspace"
+import { formatMoney } from "@/lib/money"
 import { api } from "@workspace/backend/convex/_generated/api"
 import {
   Card,
@@ -23,7 +24,7 @@ import {
 
 export function EventOverview() {
   const event = useEventWorkspace()
-  const summary = useQuery((api as any).organizerOrders.getSummary, {
+  const summary = useQuery(api.organizerOrders.getSummary, {
     eventId: event._id,
   }) as any
   return (
@@ -35,7 +36,7 @@ export function EventOverview() {
               ["Submitted orders", summary.submittedOrderCount],
               [
                 "Current order value",
-                `${summary.currency} ${summary.currentOrderValueMinor.toLocaleString()}`,
+                formatMoney(summary.currentOrderValueMinor, summary.currency),
               ],
               ["Needs payment check", summary.paymentsNeedingReview],
               ["Completed orders", summary.completedOrders],
@@ -59,8 +60,16 @@ export function EventOverview() {
             </CardHeader>
             <CardContent className="text-base">
               {summary.needsAttention} items need a check. Invitations:{" "}
-              {summary.invitations.total} total, {summary.invitations.sent}{" "}
-              sent, {summary.invitations.needsAttention} need attention.
+              {summary.invitations.total} total; {summary.invitations.notSent}{" "}
+              not sent; {summary.invitations.queued} queued;{" "}
+              {summary.invitations.sent} sent; {summary.invitations.delivered}{" "}
+              delivered; {summary.invitations.delayed} delayed;{" "}
+              {summary.invitations.failed} failed; and{" "}
+              {summary.invitations.suppressed} blocked.{" "}
+              {summary.invitations.ordersSubmitted} submitted orders and{" "}
+              {summary.invitations.ordersCompleted} completed orders came from
+              invited guests. {summary.confirmedAwaitingPreparation} confirmed
+              orders are waiting to be prepared.
             </CardContent>
           </Card>
           <Card>

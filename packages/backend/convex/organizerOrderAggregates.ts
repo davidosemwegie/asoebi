@@ -4,25 +4,18 @@ import { components } from "./_generated/api"
 import type { DataModel, Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx } from "./_generated/server"
 
-const organizerComponents = components as unknown as {
-  orderPaymentCounts: any
-  orderValues: any
-  orderProgressCounts: any
-  itemDemand: any
-}
-
 /**
  * Every aggregate is event-namespaced. Events are independent operational
  * units, so this avoids both cross-tenant reads and unnecessary contention.
  */
 export const orderPaymentCounts = new TableAggregate<{
   Namespace: Id<"events">
-  Key: string
+  Key: [string, string]
   DataModel: DataModel
   TableName: "orders"
-}>(organizerComponents.orderPaymentCounts, {
+}>(components.orderPaymentCounts, {
   namespace: (doc) => doc.eventId,
-  sortKey: (doc) => doc.paymentStatus,
+  sortKey: (doc) => [doc.lifecycle, doc.paymentStatus],
 })
 
 export const orderValues = new TableAggregate<{
@@ -30,7 +23,7 @@ export const orderValues = new TableAggregate<{
   Key: string
   DataModel: DataModel
   TableName: "orders"
-}>(organizerComponents.orderValues, {
+}>(components.orderValues, {
   namespace: (doc) => doc.eventId,
   sortKey: (doc) => doc.lifecycle,
   sumValue: (doc) =>
@@ -41,12 +34,12 @@ export const orderValues = new TableAggregate<{
 
 export const orderProgressCounts = new TableAggregate<{
   Namespace: Id<"events">
-  Key: string
+  Key: [string, string, string]
   DataModel: DataModel
   TableName: "orders"
-}>(organizerComponents.orderProgressCounts, {
+}>(components.orderProgressCounts, {
   namespace: (doc) => doc.eventId,
-  sortKey: (doc) => doc.progress,
+  sortKey: (doc) => [doc.lifecycle, doc.paymentStatus, doc.progress],
 })
 
 export const itemDemand = new TableAggregate<{
@@ -54,7 +47,7 @@ export const itemDemand = new TableAggregate<{
   Key: [string, Id<"items">]
   DataModel: DataModel
   TableName: "orderLines"
-}>(organizerComponents.itemDemand, {
+}>(components.itemDemand, {
   namespace: (doc) => doc.eventId,
   sortKey: (doc) => [doc.lifecycle, doc.itemId],
   sumValue: (doc) => doc.quantity,
@@ -65,9 +58,9 @@ export async function insertOrderAggregate(
   order: Doc<"orders">
 ) {
   await Promise.all([
-    orderPaymentCounts.insert(ctx, order),
-    orderValues.insert(ctx, order),
-    orderProgressCounts.insert(ctx, order),
+    orderPaymentCounts.insertIfDoesNotExist(ctx, order),
+    orderValues.insertIfDoesNotExist(ctx, order),
+    orderProgressCounts.insertIfDoesNotExist(ctx, order),
   ])
 }
 
@@ -77,9 +70,9 @@ export async function replaceOrderAggregate(
   next: Doc<"orders">
 ) {
   await Promise.all([
-    orderPaymentCounts.replace(ctx, previous, next),
-    orderValues.replace(ctx, previous, next),
-    orderProgressCounts.replace(ctx, previous, next),
+    orderPaymentCounts.replaceOrInsert(ctx, previous, next),
+    orderValues.replaceOrInsert(ctx, previous, next),
+    orderProgressCounts.replaceOrInsert(ctx, previous, next),
   ])
 }
 
@@ -87,14 +80,14 @@ export async function insertLineAggregate(
   ctx: MutationCtx,
   line: Doc<"orderLines">
 ) {
-  await itemDemand.insert(ctx, line)
+  await itemDemand.insertIfDoesNotExist(ctx, line)
 }
 
 export async function deleteLineAggregate(
   ctx: MutationCtx,
   line: Doc<"orderLines">
 ) {
-  await itemDemand.delete(ctx, line)
+  await itemDemand.deleteIfExists(ctx, line)
 }
 
 export async function replaceLineAggregate(
@@ -102,5 +95,5 @@ export async function replaceLineAggregate(
   previous: Doc<"orderLines">,
   next: Doc<"orderLines">
 ) {
-  await itemDemand.replace(ctx, previous, next)
+  await itemDemand.replaceOrInsert(ctx, previous, next)
 }
