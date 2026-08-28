@@ -59,6 +59,8 @@ const listArgs = {
   ),
   fulfillmentOptionId: v.optional(v.id("fulfillmentOptions")),
 }
+const paymentStatuses = ["not_submitted", "pending_review", "confirmed", "rejected"] as const
+const progressStatuses = ["pending", "preparing", "ready_for_pickup", "dispatched", "fulfilled", "cancelled"] as const
 
 const orderHistoryResult = v.object({
   _id: v.id("orderStatusHistory"),
@@ -112,6 +114,10 @@ function submittedProgressBounds(progress: string) {
     lower: { key, inclusive: true },
     upper: { key, inclusive: true },
   }
+}
+function submittedPaymentProgressBounds(paymentStatus: string, progress: string) {
+  const key: [string, string, string] = ["submitted", paymentStatus, progress]
+  return { lower: { key, inclusive: true }, upper: { key, inclusive: true } }
 }
 
 function invitationBounds(value: string) {
@@ -373,6 +379,25 @@ export const getSummary = query({
         }),
       }))
     )
+    const paymentCounts = await Promise.all(
+      paymentStatuses.map(async (paymentStatus) => [
+        paymentStatus,
+        await orderPaymentCounts.count(ctx, { namespace: eventId, bounds: submittedPaymentBounds(paymentStatus) }),
+      ] as const)
+    )
+    const progressCounts = await Promise.all(
+      progressStatuses.map(async (progress) => {
+        const counts = await Promise.all(
+          paymentStatuses.map((paymentStatus) =>
+            orderProgressCounts.count(ctx, {
+              namespace: eventId,
+              bounds: submittedPaymentProgressBounds(paymentStatus, progress),
+            })
+          )
+        )
+        return [progress, counts.reduce((sum, value) => sum + value, 0)] as const
+      })
+    )
     return {
       eventName: event.name,
       currency: event.currency,
@@ -380,6 +405,8 @@ export const getSummary = query({
       currentOrderValueMinor: value,
       paymentsNeedingReview: needsPaymentCheck,
       completedOrders: completed,
+      paymentBreakdown: Object.fromEntries(paymentCounts),
+      progressBreakdown: Object.fromEntries(progressCounts),
       confirmedAwaitingPreparation,
       needsAttention:
         needsPaymentCheck +
@@ -605,6 +632,7 @@ export const getExportPage = internalQuery({
 async function notify(
   ctx: MutationCtx,
   order: Doc<"orders">,
+  transitionId: Id<"orderStatusHistory">,
   kind:
     | "payment_confirmed"
     | "payment_rejected"
@@ -617,7 +645,7 @@ async function notify(
   const event = await ctx.db.get(order.eventId)
   if (!event || !order.guestEmail || !order.guestName) return
   await createNotification(ctx, {
-    dedupeKey: `order:${kind}:${order._id}:${order.updatedAt}`,
+    dedupeKey: `order:${kind}:${order._id}:${transitionId}`,
     recipient: order.guestEmail,
     ownerId: event.ownerId,
     eventRef: `${event._id}`,
@@ -660,7 +688,7 @@ export const decidePayment = mutation({
     if (!updated) throw new Error("Order not found.")
     await replaceOrderAggregate(ctx, order, updated)
     await patchLineProjections(ctx, updated)
-    await appendOrderHistory(ctx, {
+    const transitionId = await appendOrderHistory(ctx, {
       order,
       actorUserId: event.ownerId,
       actorRole: "organizer",
@@ -669,6 +697,7 @@ export const decidePayment = mutation({
     })
     await ctx.scheduler.runAfter(0, internal.organizerOrders.notifyLifecycle, {
       orderId: updated._id,
+      transitionId,
       kind:
         args.decision === "confirmed"
           ? "payment_confirmed"
@@ -716,7 +745,7 @@ export const advanceFulfillment = mutation({
     if (!updated) throw new Error("Order not found.")
     await replaceOrderAggregate(ctx, order, updated)
     await patchLineProjections(ctx, updated)
-    await appendOrderHistory(ctx, {
+    const transitionId = await appendOrderHistory(ctx, {
       order,
       actorUserId: event.ownerId,
       actorRole: "organizer",
@@ -739,6 +768,7 @@ export const advanceFulfillment = mutation({
             : "completed"
     await ctx.scheduler.runAfter(0, internal.organizerOrders.notifyLifecycle, {
       orderId: updated._id,
+      transitionId,
       kind,
     })
     return null
@@ -773,7 +803,7 @@ export const cancel = mutation({
     if (!updated) throw new Error("Order not found.")
     await replaceOrderAggregate(ctx, order, updated)
     await patchLineProjections(ctx, updated)
-    await appendOrderHistory(ctx, {
+    const transitionId = await appendOrderHistory(ctx, {
       order,
       actorUserId: event.ownerId,
       actorRole: "organizer",
@@ -783,6 +813,7 @@ export const cancel = mutation({
     })
     await ctx.scheduler.runAfter(0, internal.organizerOrders.notifyLifecycle, {
       orderId: updated._id,
+      transitionId,
       kind: "organizer_cancelled",
     })
     return null
@@ -792,6 +823,7 @@ export const cancel = mutation({
 export const notifyLifecycle = internalMutation({
   args: {
     orderId: v.id("orders"),
+    transitionId: v.id("orderStatusHistory"),
     kind: v.union(
       v.literal("payment_confirmed"),
       v.literal("payment_rejected"),
@@ -805,7 +837,7 @@ export const notifyLifecycle = internalMutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const order = await ctx.db.get(args.orderId)
-    if (order) await notify(ctx, order, args.kind)
+    if (order) await notify(ctx, order, args.transitionId, args.kind)
     return null
   },
 })
