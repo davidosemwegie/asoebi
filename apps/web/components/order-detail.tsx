@@ -30,19 +30,25 @@ const progressWords: Record<string, string> = {
   pending: "Pending",
   preparing: "Preparing",
   ready_for_pickup: "Ready for pickup",
-  dispatched: "Dispatched",
-  fulfilled: "Fulfilled",
+  dispatched: "Sent for delivery",
+  fulfilled: "Completed",
   cancelled: "Cancelled",
 }
 
 export function OrderDetail({ orderId }: { orderId: string }) {
-  const data = useQuery(api.orders.getMine, { orderId: orderId as never })
+  const data = useQuery(api.orders.getMine, { orderId })
   const cancel = useMutation(api.checkout.cancelMine)
   const [error, setError] = useState<string | null>(null)
   if (data === undefined)
     return (
       <main className="mx-auto max-w-3xl px-4 py-8 text-base">
         Loading your order…
+      </main>
+    )
+  if (!data)
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-8 text-lg">
+        Order unavailable.
       </main>
     )
   const { order, event, lines, history } = data
@@ -144,7 +150,9 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           Cancel order
         </Button>
       ) : null}
-      {event?.shareToken && order.paymentStatus === "pending_review" ? (
+      {event?.shareToken &&
+      event.orderingOpen &&
+      order.paymentStatus === "pending_review" ? (
         <Button
           nativeButton={false}
           render={<Link href={`/e/${event.shareToken}/order/items`} />}
@@ -153,7 +161,9 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           Edit order
         </Button>
       ) : null}
-      {event?.shareToken && order.paymentStatus === "rejected" ? (
+      {event?.shareToken &&
+      event.orderingOpen &&
+      order.paymentStatus === "rejected" ? (
         <Button
           nativeButton={false}
           render={<Link href={`/e/${event.shareToken}/order/items`} />}

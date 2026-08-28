@@ -9,7 +9,7 @@ const internalCheckout = internal as unknown as {
       "mutation",
       "internal",
       Record<string, never>,
-      { claims: number; receipts: number }
+      { claims: number; receipts: number; orphans: number }
     >
   }
 }

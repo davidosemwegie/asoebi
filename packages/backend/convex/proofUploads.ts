@@ -15,6 +15,12 @@ const internalCheckout = internal as unknown as {
       { claimId: Id<"proofUploadClaims">; storageId: Id<"_storage"> },
       { contentType: string } | null
     >
+    recordProofUpload: FunctionReference<
+      "mutation",
+      "internal",
+      { claimId: Id<"proofUploadClaims">; storageId: Id<"_storage"> },
+      boolean
+    >
     finalizeProofUpload: FunctionReference<
       "mutation",
       "internal",
@@ -75,6 +81,16 @@ export const finalize = action({
     v.object({ ok: v.literal(false), message: v.string() })
   ),
   handler: async (ctx, args) => {
+    if (
+      !(await ctx.runMutation(
+        internalCheckout.checkout.recordProofUpload,
+        args
+      ))
+    )
+      return {
+        ok: false as const,
+        message: "This payment receipt could not be verified. Upload it again.",
+      }
     const candidate = await ctx.runQuery(
       internalCheckout.checkout.inspectProofUpload,
       args

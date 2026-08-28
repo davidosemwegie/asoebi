@@ -91,7 +91,7 @@ function Stepper({
   const currentIndex = ORDER_STEPS.indexOf(current)
   return (
     <nav aria-label="Order steps" className="pb-1">
-      <ol className="flex flex-wrap gap-2 text-base">
+      <ol className="flex flex-wrap gap-2 text-lg">
         {ORDER_STEPS.map((step, index) => {
           const active = index === currentIndex
           const href = `/e/${shareToken}/order/${step}`
@@ -737,7 +737,7 @@ export function OrderFlow({
                 </Field>
                 {selectedOption?.type === "pickup" ? (
                   <Field data-invalid={Boolean(detailErrors.pickupContact)}>
-                    <FieldLabel htmlFor="pickup-contact">
+                    <FieldLabel htmlFor="detail-pickupContact">
                       Pickup contact
                       {selectedOption.requiredFields.kind === "pickup" &&
                       selectedOption.requiredFields.pickupContact
@@ -769,7 +769,7 @@ export function OrderFlow({
                 ) : (
                   <>
                     <Field data-invalid={Boolean(detailErrors.recipientName)}>
-                      <FieldLabel htmlFor="recipient-name">
+                      <FieldLabel htmlFor="detail-recipientName">
                         Recipient name
                         {selectedOption?.requiredFields.kind === "delivery" &&
                         selectedOption.requiredFields.recipientName
@@ -799,7 +799,7 @@ export function OrderFlow({
                       </FieldError>
                     </Field>
                     <Field data-invalid={Boolean(detailErrors.phoneNumber)}>
-                      <FieldLabel htmlFor="delivery-phone">
+                      <FieldLabel htmlFor="detail-phoneNumber">
                         Delivery phone number
                         {selectedOption?.requiredFields.kind === "delivery" &&
                         selectedOption.requiredFields.phoneNumber
@@ -829,7 +829,7 @@ export function OrderFlow({
                       </FieldError>
                     </Field>
                     <Field data-invalid={Boolean(detailErrors.address)}>
-                      <FieldLabel htmlFor="address">
+                      <FieldLabel htmlFor="detail-address">
                         Delivery address
                         {selectedOption?.requiredFields.kind === "delivery" &&
                         selectedOption.requiredFields.address
@@ -859,7 +859,7 @@ export function OrderFlow({
                       </FieldError>
                     </Field>
                     <Field data-invalid={Boolean(detailErrors.availability)}>
-                      <FieldLabel htmlFor="availability">
+                      <FieldLabel htmlFor="detail-availability">
                         Delivery availability
                         {selectedOption?.requiredFields.kind === "delivery" &&
                         selectedOption.requiredFields.availability
@@ -889,7 +889,7 @@ export function OrderFlow({
                       </FieldError>
                     </Field>
                     <Field data-invalid={Boolean(detailErrors.notes)}>
-                      <FieldLabel htmlFor="notes">
+                      <FieldLabel htmlFor="detail-notes">
                         Delivery notes
                         {selectedOption?.requiredFields.kind === "delivery" &&
                         selectedOption.requiredFields.notes

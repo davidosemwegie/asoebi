@@ -211,6 +211,13 @@ describe("guest checkout", () => {
     })
     expect(checkout!.attendee.emailVerified).toBe(false)
     expect(checkout!.order!.lifecycle).toBe("draft")
+    const proofId = await proofFor(t, checkout!.order!._id, guest.userId)
+    await expect(
+      guest.client.mutation(
+        api.checkout.submit,
+        submitArgs(event, proofId, "unverified-submit")
+      )
+    ).rejects.toThrow("Verify your email")
   })
 
   it("submits once, reserves atomically, and replays a canonically equivalent request", async () => {
@@ -426,5 +433,79 @@ describe("guest checkout", () => {
         optionId: event.optionId,
       })
     ).rejects.toThrow("active order")
+  })
+
+  it("keeps reads available after close while blocking guest order writes", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const draft = await draftFor(t, event, "closed@example.com")
+    const orderId = await draft.guest.client.mutation(
+      api.checkout.submit,
+      submitArgs(event, draft.proofId, "closed-submit")
+    )
+    await t.run(async (ctx) => {
+      const order = await ctx.db.get(orderId)
+      const stored = await ctx.db.get(order!.eventId)
+      await ctx.db.patch(stored!._id, {
+        status: "closed",
+        updatedAt: Date.now(),
+      })
+    })
+    expect(
+      await draft.guest.client.query(api.orders.getMine, { orderId })
+    ).toMatchObject({
+      order: { _id: orderId, lifecycle: "submitted" },
+    })
+    await expect(
+      draft.guest.client.mutation(api.checkout.cancelMine, {
+        shareToken: event.shareToken,
+        requestId: "closed-cancel",
+      })
+    ).rejects.toThrow("no longer accepting")
+    await expect(
+      draft.guest.client.mutation(api.checkout.updatePending, {
+        ...submitArgs(event, draft.proofId, "closed-update"),
+      })
+    ).rejects.toThrow("no longer accepting")
+  })
+
+  it("bounds guest contact input before a draft or update write", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const guest = await user(t, "length@example.com")
+    await guest.client.mutation(api.eventAttendees.startCheckout, {
+      shareToken: event.shareToken,
+    })
+    await expect(
+      guest.client.mutation(api.checkout.saveDraft, {
+        shareToken: event.shareToken,
+        lines: [{ itemId: event.itemId, quantity: 1 }],
+        guestName: "a".repeat(161),
+      })
+    ).rejects.toThrow("name is too long")
+  })
+
+  it("rejects another attendee's proof and keeps order reads tenant-isolated", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const first = await draftFor(t, event, "proof-owner@example.com")
+    const second = await draftFor(t, event, "proof-thief@example.com")
+    await expect(
+      second.guest.client.mutation(
+        api.checkout.submit,
+        submitArgs(event, first.proofId, "foreign-proof")
+      )
+    ).rejects.toThrow("valid payment receipt")
+    const orderId = await first.guest.client.mutation(
+      api.checkout.submit,
+      submitArgs(event, first.proofId, "own-proof")
+    )
+    expect(
+      await second.guest.client.query(api.orders.getMine, { orderId })
+    ).toBeNull()
+    const page = await second.guest.client.query(api.orders.listMine, {
+      paginationOpts: { numItems: 10, cursor: null },
+    })
+    expect(page.page.map((entry) => entry._id)).not.toContain(orderId)
   })
 })

@@ -94,13 +94,14 @@ export const listMine = query({
 })
 
 export const getMine = query({
-  args: { orderId: v.id("orders") },
-  returns: mineDetail,
+  args: { orderId: v.string() },
+  returns: v.union(mineDetail, v.null()),
   handler: async (ctx, { orderId }) => {
     const user = await authComponent.getAuthUser(ctx)
-    const order = await ctx.db.get(orderId)
-    if (!order || order.userId !== user._id)
-      throw new ConvexError("Order not found.")
+    const normalized = ctx.db.normalizeId("orders", orderId)
+    if (!normalized) return null
+    const order = await ctx.db.get(normalized)
+    if (!order || order.userId !== user._id) return null
     const [event, lines, history] = await Promise.all([
       ctx.db.get(order.eventId),
       ctx.db

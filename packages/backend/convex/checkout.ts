@@ -61,6 +61,12 @@ const internalCheckout = internal as unknown as {
       Record<string, never>,
       { claims: number; receipts: number }
     >
+    recordProofUpload: FunctionReference<
+      "mutation",
+      "internal",
+      { claimId: Id<"proofUploadClaims">; storageId: Id<"_storage"> },
+      boolean
+    >
   }
 }
 const internalAuth = internal as unknown as {
@@ -458,6 +464,12 @@ export const saveDraft = mutation({
         totalMinor: 0,
         ...normalizeGuest(args.guestName, args.guestPhone),
         reviewedAt: args.reviewed ? Date.now() : undefined,
+        fulfillmentOptionId: undefined,
+        fulfillmentOptionName: undefined,
+        fulfillmentType: undefined,
+        fulfillmentInstructions: undefined,
+        fulfillmentRequiredFields: undefined,
+        fulfillmentDetails: undefined,
         proofRequired: false,
         updatedAt: Date.now(),
       })
@@ -1037,6 +1049,24 @@ export const inspectProofUpload = internalQuery({
   },
 })
 
+export const recordProofUpload = internalMutation({
+  args: { claimId: v.id("proofUploadClaims"), storageId: v.id("_storage") },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const user = await authComponent.getAuthUser(ctx)
+    const claim = await ctx.db.get(args.claimId)
+    if (
+      !claim ||
+      claim.uploaderUserId !== user._id ||
+      claim.expiresAt < Date.now()
+    )
+      return false
+    if (claim.storageId && claim.storageId !== args.storageId) return false
+    await ctx.db.patch(claim._id, { storageId: args.storageId })
+    return true
+  },
+})
+
 export const finalizeProofUpload = internalMutation({
   args: {
     claimId: v.id("proofUploadClaims"),
@@ -1157,6 +1187,7 @@ export const afterSubmit = internalMutation({
     await createNotification(ctx, {
       dedupeKey: `order:guest-submitted:${order._id}:${order.submittedAt ?? order.updatedAt}`,
       recipient: order.guestEmail,
+      ownerId: event.ownerId,
       eventRef: `${event._id}`,
       orderRef: `${order._id}`,
       template: {
@@ -1219,6 +1250,7 @@ export const afterCancellation = internalMutation({
     await createNotification(ctx, {
       dedupeKey: `order:guest-cancelled:${order._id}`,
       recipient: order.guestEmail,
+      ownerId: event.ownerId,
       eventRef: `${event._id}`,
       orderRef: `${order._id}`,
       template: {
@@ -1235,7 +1267,11 @@ export const afterCancellation = internalMutation({
 
 export const cleanExpiredOrderArtifacts = internalMutation({
   args: {},
-  returns: v.object({ claims: v.number(), receipts: v.number() }),
+  returns: v.object({
+    claims: v.number(),
+    receipts: v.number(),
+    orphans: v.number(),
+  }),
   handler: async (ctx) => {
     const now = Date.now()
     const [claims, receipts] = await Promise.all([
@@ -1248,14 +1284,59 @@ export const cleanExpiredOrderArtifacts = internalMutation({
         .withIndex("by_expiresAt", (q) => q.lte("expiresAt", now))
         .take(100),
     ])
-    for (const claim of claims) await ctx.db.delete(claim._id)
+    for (const claim of claims) {
+      if (claim.storageId) await ctx.storage.delete(claim.storageId)
+      await ctx.db.delete(claim._id)
+    }
     for (const receipt of receipts) await ctx.db.delete(receipt._id)
+    const cursor = await ctx.db
+      .query("storageScavengerCursors")
+      .withIndex("by_name", (q) => q.eq("name", "payment-proof-orphans"))
+      .unique()
+    const page = await ctx.db.system
+      .query("_storage")
+      .paginate({ numItems: 50, cursor: cursor?.cursor ?? null })
+    let orphans = 0
+    for (const stored of page.page) {
+      if (stored._creationTime > now - CLAIM_TTL) continue
+      const [proof, cover, claim] = await Promise.all([
+        ctx.db
+          .query("paymentProofs")
+          .withIndex("by_storageId", (q) => q.eq("storageId", stored._id))
+          .unique(),
+        ctx.db
+          .query("events")
+          .withIndex("by_coverStorageId", (q) =>
+            q.eq("coverStorageId", stored._id)
+          )
+          .unique(),
+        ctx.db
+          .query("proofUploadClaims")
+          .withIndex("by_storageId", (q) => q.eq("storageId", stored._id))
+          .unique(),
+      ])
+      if (!proof && !cover && !claim) {
+        await ctx.storage.delete(stored._id)
+        orphans += 1
+      }
+    }
+    if (cursor)
+      await ctx.db.patch(cursor._id, {
+        cursor: page.isDone ? undefined : page.continueCursor,
+        updatedAt: now,
+      })
+    else
+      await ctx.db.insert("storageScavengerCursors", {
+        name: "payment-proof-orphans",
+        cursor: page.isDone ? undefined : page.continueCursor,
+        updatedAt: now,
+      })
     if (claims.length === 100 || receipts.length === 100)
       await ctx.scheduler.runAfter(
         0,
         internalCheckout.checkout.cleanExpiredOrderArtifacts,
         {}
       )
-    return { claims: claims.length, receipts: receipts.length }
+    return { claims: claims.length, receipts: receipts.length, orphans }
   },
 })

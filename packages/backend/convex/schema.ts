@@ -107,7 +107,8 @@ export default defineSchema({
   events: defineTable(eventFields.fields)
     .index("by_ownerId", ["ownerId"])
     .index("by_ownerId_and_status", ["ownerId", "status"])
-    .index("by_shareToken", ["shareToken"]),
+    .index("by_shareToken", ["shareToken"])
+    .index("by_coverStorageId", ["coverStorageId"]),
   items: defineTable(itemFields.fields)
     .index("by_eventId_and_sortOrder", ["eventId", "sortOrder"])
     .index("by_eventId_and_isHidden_and_sortOrder", [
@@ -294,10 +295,17 @@ export default defineSchema({
     contentType: v.string(),
     size: v.number(),
     sha256: v.string(),
+    storageId: v.optional(v.id("_storage")),
     expiresAt: v.number(),
   })
     .index("by_eventId_and_attendeeId", ["eventId", "attendeeId"])
+    .index("by_storageId", ["storageId"])
     .index("by_expiresAt", ["expiresAt"]),
+  storageScavengerCursors: defineTable({
+    name: v.string(),
+    cursor: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_name", ["name"]),
   eventInvitations: defineTable({
     eventId: v.id("events"),
     name: v.string(),
