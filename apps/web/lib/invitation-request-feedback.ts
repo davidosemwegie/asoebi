@@ -12,12 +12,33 @@ export function invitationRequestFeedback(results: InvitationRequestResult[]) {
   ).length
   const notFound = results.filter((item) => item.outcome === "not_found").length
   const needsAttention = blocked + alreadySent + notFound > 0
+  const clauses: string[] = []
+  if (queued > 0) {
+    clauses.push(
+      `${queued} invitation${queued === 1 ? " was" : "s were"} queued for delivery.`
+    )
+  }
+  if (blocked > 0) {
+    clauses.push(
+      `${blocked} guest${blocked === 1 ? " needs" : "s need"} an email correction before sending again.`
+    )
+  }
+  if (alreadySent > 0) {
+    clauses.push(
+      `${alreadySent} invitation${alreadySent === 1 ? " was" : "s were"} already sent or ${alreadySent === 1 ? "is" : "are"} no longer eligible.`
+    )
+  }
+  if (notFound > 0) {
+    clauses.push(
+      `${notFound} guest${notFound === 1 ? " could" : "s could"} not be found. Refresh the guest list and select them again.`
+    )
+  }
 
   return {
     type: needsAttention ? ("error" as const) : ("success" as const),
     title: needsAttention
       ? "Some guests need attention"
       : "Invitation request saved",
-    message: `${queued} queued for delivery. ${blocked} need an email correction. ${alreadySent} were already sent or are no longer eligible. ${notFound} could not be found; refresh the guest list and select them again.`,
+    message: clauses.join(" "),
   }
 }
