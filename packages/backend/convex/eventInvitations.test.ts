@@ -469,6 +469,54 @@ describe("event invitations", () => {
     ).toBe("delivered")
   })
 
+  it("projects a late permanent event from an older generation as suppression", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    await publishForSending(t, eventId)
+    const invitation = await client.mutation(api.eventInvitations.add, {
+      eventId,
+      name: "Guest",
+      email: "guest@example.com",
+    })
+    await client.mutation(api.eventInvitations.send, {
+      eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-0030",
+    })
+    const first = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
+      notificationId: first!.currentNotificationId!,
+      status: "sent",
+    })
+    await client.mutation(api.eventInvitations.send, {
+      eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-0031",
+      resend: true,
+    })
+    const resend = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
+      notificationId: first!.currentNotificationId!,
+      status: "bounced",
+    })
+    expect(
+      (await t.run(async (ctx) => ctx.db.get(invitation._id)))!
+        .latestDeliveryState
+    ).toBe("suppressed")
+    expect(
+      (await t.run(async (ctx) => ctx.db.get(invitation._id)))!
+        .currentNotificationId
+    ).toBe(resend!.currentNotificationId)
+    await expect(
+      client.mutation(api.eventInvitations.retry, {
+        eventId,
+        invitationIds: [invitation._id],
+        requestId: "retry-0030",
+      })
+    ).resolves.toEqual([{ invitationId: invitation._id, outcome: "blocked" }])
+  })
+
   it("links only verified matching checkout users and does not gate another guest", async () => {
     const t = createTest()
     const { client: owner } = await createUser(t, "owner@example.com")

@@ -735,15 +735,36 @@ export const projectNotificationDelivery = internalMutation({
   args: { notificationId: v.id("notifications"), status: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const invitation = await ctx.db
+    const currentInvitation = await ctx.db
       .query("eventInvitations")
       .withIndex("by_currentNotificationId", (q) =>
         q.eq("currentNotificationId", args.notificationId)
       )
       .unique()
-    if (!invitation) return null
     const latestDeliveryState = mapNotificationState(args.status)
-    if (invitation.latestDeliveryState !== latestDeliveryState)
+    if (currentInvitation) {
+      if (currentInvitation.latestDeliveryState !== latestDeliveryState)
+        await replaceInvitation(ctx, currentInvitation, {
+          latestDeliveryState,
+          updatedAt: Date.now(),
+        })
+      return null
+    }
+    if (latestDeliveryState !== "suppressed") return null
+
+    const notification = await ctx.db.get(args.notificationId)
+    if (!notification?.invitationRef || !notification.eventRef) return null
+    const invitation = await ctx.db.get(
+      notification.invitationRef as Id<"eventInvitations">
+    )
+    if (
+      !invitation ||
+      `${invitation._id}` !== notification.invitationRef ||
+      `${invitation.eventId}` !== notification.eventRef ||
+      invitation.normalizedEmail !== notification.recipient
+    )
+      return null
+    if (invitation.latestDeliveryState !== "suppressed")
       await replaceInvitation(ctx, invitation, {
         latestDeliveryState,
         updatedAt: Date.now(),
