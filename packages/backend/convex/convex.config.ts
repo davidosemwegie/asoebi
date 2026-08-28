@@ -21,5 +21,9 @@ app.use(betterAuth)
 app.use(resend)
 app.use(aggregate, { name: "invitationDeliveryCounts" })
 app.use(aggregate, { name: "invitationActivityCounts" })
+app.use(aggregate, { name: "orderPaymentCounts" })
+app.use(aggregate, { name: "orderValues" })
+app.use(aggregate, { name: "orderProgressCounts" })
+app.use(aggregate, { name: "itemDemand" })
 
 export default app

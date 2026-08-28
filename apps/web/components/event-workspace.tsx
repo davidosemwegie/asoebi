@@ -102,7 +102,7 @@ export function EventWorkspace({
     ? "items"
     : pathname.includes("/guests")
       ? "guests"
-      : pathname.endsWith("/orders")
+      : pathname.includes("/orders")
         ? "orders"
         : pathname.endsWith("/setup")
           ? "setup"

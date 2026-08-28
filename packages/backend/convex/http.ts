@@ -11,6 +11,7 @@ import { env, httpAction, type ActionCtx } from "./_generated/server"
 const http = httpRouter()
 const PUBLIC_EVENT_COVER_PREFIX = "/public-event-cover/v1/"
 const PRIVATE_ORDER_RECEIPT_PREFIX = "/private-order-receipt/v1/"
+const PRIVATE_ORDER_EXPORT_PREFIX = "/private-order-export/v1/"
 const internalOrders = internal as unknown as {
   orders: {
     getReceiptForOwner: FunctionReference<
@@ -23,6 +24,9 @@ const internalOrders = internal as unknown as {
         reference: string
       } | null
     >
+  }
+  organizerOrders: {
+    getExportRows: FunctionReference<"query", "internal", any, any>
   }
 }
 
@@ -63,6 +67,36 @@ http.route({
   pathPrefix: PUBLIC_EVENT_COVER_PREFIX,
   method: "GET",
   handler: httpAction(servePublicEventCover),
+})
+
+http.route({
+  pathPrefix: PRIVATE_ORDER_EXPORT_PREFIX,
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url)
+    const eventId = url.pathname.slice(PRIVATE_ORDER_EXPORT_PREFIX.length)
+    if (!eventId || eventId.includes("/"))
+      return new Response("Not found", { status: 404 })
+    try {
+      const rows = await ctx.runQuery(
+        internalOrders.organizerOrders.getExportRows,
+        {
+          eventId: eventId as Id<"events">,
+          search: url.searchParams.get("search") || undefined,
+          paymentStatus: url.searchParams.get("paymentStatus") || undefined,
+          progress: url.searchParams.get("progress") || undefined,
+          fulfillmentOptionId:
+            url.searchParams.get("fulfillmentOptionId") || undefined,
+          itemId: url.searchParams.get("itemId") || undefined,
+        }
+      )
+      return Response.json(rows, {
+        headers: { "Cache-Control": "private, no-store" },
+      })
+    } catch {
+      return new Response("Not found", { status: 404 })
+    }
+  }),
 })
 
 http.route({
