@@ -378,6 +378,25 @@ export const importBatch = mutation({
         outcomes: replay.outcomes,
       }
     }
+    if (
+      new Set(args.rows.map((row) => row.rowNumber)).size !== args.rows.length
+    )
+      throw new ConvexError("Import row numbers must be unique.")
+    const earlierChunks = await ctx.db
+      .query("eventInvitationImportChunks")
+      .withIndex("by_eventId_and_importId_and_chunkIndex", (q) =>
+        q.eq("eventId", args.eventId).eq("importId", args.importId)
+      )
+      .take(MAX_IMPORT_ROWS / MAX_CHUNK_ROWS)
+    const earlierRowNumbers = new Set(
+      earlierChunks.flatMap((chunk) =>
+        chunk.outcomes.map((outcome) => outcome.rowNumber)
+      )
+    )
+    if (args.rows.some((row) => earlierRowNumbers.has(row.rowNumber)))
+      throw new ConvexError(
+        "Import row numbers overlap an earlier import chunk."
+      )
     const outcomes: Array<{
       rowNumber: number
       outcome: "created" | "duplicate" | "invalid"
@@ -561,6 +580,16 @@ function uniqueSelection(invitationIds: Id<"eventInvitations">[]) {
     throw new ConvexError("Select each guest only once.")
 }
 
+function requireInvitationDeliveryOpen(event: Doc<"events">) {
+  if (event.status !== "published" || !event.shareToken)
+    throw new ConvexError("Publish the event before sending invitations.")
+  if (
+    event.orderDeadlineAt === undefined ||
+    event.orderDeadlineAt <= Date.now()
+  )
+    throw new ConvexError("The ordering deadline has passed.")
+}
+
 export const send = mutation({
   args: {
     eventId: v.id("events"),
@@ -582,8 +611,7 @@ export const send = mutation({
       args.resend === true
     )
     if (replay) return replay
-    if (event.status !== "published" || !event.shareToken)
-      throw new ConvexError("Publish the event before sending invitations.")
+    requireInvitationDeliveryOpen(event)
     const owner = await authComponent.getAuthUser(ctx)
     const results: Array<{
       invitationId: Id<"eventInvitations">
@@ -658,7 +686,7 @@ export const retry = mutation({
   },
   returns: v.array(sendResult),
   handler: async (ctx, args) => {
-    await requireEditableEvent(ctx, args.eventId)
+    const event = await requireEditableEvent(ctx, args.eventId)
     validateRequestId(args.requestId)
     uniqueSelection(args.invitationIds)
     const replay = await findSendReplay(
@@ -669,6 +697,7 @@ export const retry = mutation({
       args.invitationIds
     )
     if (replay) return replay
+    requireInvitationDeliveryOpen(event)
     const results: Array<{
       invitationId: Id<"eventInvitations">
       outcome: "queued" | "retried" | "already_sent" | "blocked" | "not_found"

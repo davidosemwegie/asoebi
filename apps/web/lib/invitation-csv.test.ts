@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   createInvitationErrorCsv,
   getImportChunks,
+  localInvitationImportOutcome,
   normalizeInvitationEmail,
   parseInvitationImport,
 } from "./invitation-csv"
@@ -106,6 +107,33 @@ describe("invitation import parsing", () => {
       "This email is duplicated in this import."
     )
     expect(result.rows[2]?.errors).toContain("Enter a valid email address.")
+  })
+
+  it("classifies a local repeated email as a skipped duplicate, not invalid", () => {
+    const result = parseInvitationImport(
+      "name,email\nAyo,ayo@example.com\nAnother,AYO@example.com",
+      "csv"
+    )
+
+    const outcome = localInvitationImportOutcome(result.rows[1]!)
+    expect(outcome).toMatchObject({
+      rowNumber: 3,
+      outcome: "duplicate",
+    })
+    expect(outcome?.outcome).not.toBe("invalid")
+  })
+
+  it("keeps a structural error invalid even when the email is also duplicated", () => {
+    const result = parseInvitationImport(
+      "name,email\nAda,ada@example.com\nB,ada@example.com,extra",
+      "csv"
+    )
+
+    const outcome = localInvitationImportOutcome(result.rows[1]!)
+    expect(outcome).toMatchObject({ outcome: "invalid" })
+    expect(createInvitationErrorCsv([outcome!])).toContain(
+      ",Invalid,This row has more than two columns. This email is duplicated in this import."
+    )
   })
 
   it("normalizes emails independently of the browser locale", () => {

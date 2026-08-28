@@ -261,6 +261,19 @@ export function getImportChunks(rows: InvitationImportRow[]) {
   )
 }
 
+export function localInvitationImportOutcome(row: InvitationImportRow) {
+  if (row.errors.length === 0) return null
+  return {
+    rowNumber: row.rowNumber,
+    name: row.name,
+    email: row.email,
+    outcome: row.errors.every((error) => error.includes("duplicated"))
+      ? ("duplicate" as const)
+      : ("invalid" as const),
+    error: row.errors.join(" "),
+  }
+}
+
 function escapeCsvValue(value: string) {
   const formulaSafeValue =
     FORMULA_PREFIX_PATTERN.test(value) ||

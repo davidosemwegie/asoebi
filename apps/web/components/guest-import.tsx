@@ -17,6 +17,7 @@ import { useEventWorkspace } from "@/components/event-workspace"
 import {
   createInvitationErrorCsv,
   getImportChunks,
+  localInvitationImportOutcome,
   parseInvitationImport,
   type InvitationImportOutcome,
   type InvitationImportPreview,
@@ -76,6 +77,10 @@ function rowOutcome(
   outcomes: InvitationImportOutcome[]
 ) {
   return outcomes.find((outcome) => outcome.rowNumber === row.rowNumber)
+}
+
+function isLocalDuplicate(row: InvitationImportRow) {
+  return localInvitationImportOutcome(row)?.outcome === "duplicate"
 }
 
 export function GuestImport() {
@@ -138,19 +143,19 @@ export function GuestImport() {
     }
 
     if (!importId) return
-    const localOutcomes: InvitationImportOutcome[] = preview.rows
-      .filter((row) => row.errors.length > 0)
-      .map((row) => ({
-        rowNumber: row.rowNumber,
-        name: row.name,
-        email: row.email,
-        outcome: "invalid",
-        error: row.errors.join(" "),
-      }))
+    const localOutcomes: InvitationImportOutcome[] = preview.rows.flatMap(
+      (row) => {
+        const outcome = localInvitationImportOutcome(row)
+        return outcome ? [outcome] : []
+      }
+    )
 
+    const localRowNumbers = new Set(
+      localOutcomes.map((outcome) => outcome.rowNumber)
+    )
     const serverOutcomes = new Map(
       outcomes
-        .filter((outcome) => outcome.outcome !== "invalid")
+        .filter((outcome) => !localRowNumbers.has(outcome.rowNumber))
         .map((outcome) => [outcome.rowNumber, outcome])
     )
     setOutcomes([...localOutcomes, ...serverOutcomes.values()])
@@ -213,11 +218,10 @@ export function GuestImport() {
   const validCount =
     preview?.rows.filter((row) => row.errors.length === 0).length ?? 0
   const invalidCount =
-    preview?.rows.filter((row) => row.errors.length > 0).length ?? 0
-  const duplicateCount =
-    preview?.rows.filter((row) =>
-      row.errors.some((error) => error.includes("duplicated"))
+    preview?.rows.filter(
+      (row) => row.errors.length > 0 && !isLocalDuplicate(row)
     ).length ?? 0
+  const duplicateCount = preview?.rows.filter(isLocalDuplicate).length ?? 0
   const canImport = Boolean(
     preview &&
     importId &&
@@ -381,9 +385,11 @@ export function GuestImport() {
                       ? "Created"
                       : outcome?.outcome === "duplicate"
                         ? "Skipped duplicate"
-                        : errors.length
-                          ? "Invalid"
-                          : "Ready"
+                        : isLocalDuplicate(row)
+                          ? "Skipped duplicate"
+                          : errors.length
+                            ? "Invalid"
+                            : "Ready"
                   return (
                     <div
                       key={row.rowNumber}
@@ -401,7 +407,9 @@ export function GuestImport() {
                       <div className="mt-2 space-y-1 sm:mt-0 sm:text-right">
                         <Badge
                           variant={
-                            label === "Ready" || label === "Created"
+                            label === "Ready" ||
+                            label === "Created" ||
+                            label === "Skipped duplicate"
                               ? "secondary"
                               : "destructive"
                           }

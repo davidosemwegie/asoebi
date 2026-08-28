@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "convex/react"
 import {
   CheckCircle2Icon,
@@ -86,6 +86,7 @@ import {
   TableHeader,
   TableRow,
 } from "@workspace/ui/components/table"
+import { invitationRequestFeedback } from "@/lib/invitation-request-feedback"
 
 type DeliveryState =
   | "not_sent"
@@ -224,16 +225,11 @@ type RowAction =
   | { kind: "action"; action: "retry" | "send"; label: string; resend: boolean }
   | { kind: "status"; copy: string }
 
-function rowAction(invitation: Invitation): RowAction {
-  if (invitation.latestDeliveryState === "not_sent") {
-    return { kind: "action", action: "send", label: "Send", resend: false }
-  }
-  if (
-    invitation.latestDeliveryState === "failed" ||
-    invitation.latestDeliveryState === "delayed"
-  ) {
-    return { kind: "action", action: "retry", label: "Retry", resend: false }
-  }
+function rowAction(
+  invitation: Invitation,
+  invitationsCanBeSent: boolean,
+  sendingUnavailableCopy: string
+): RowAction {
   if (invitation.latestDeliveryState === "queued") {
     return {
       kind: "status",
@@ -246,21 +242,50 @@ function rowAction(invitation: Invitation): RowAction {
       copy: "Correct the email address before sending another invitation.",
     }
   }
-  return { kind: "action", action: "send", label: "Resend", resend: true }
+  if (!invitationsCanBeSent) {
+    return { kind: "status", copy: sendingUnavailableCopy }
+  }
+  if (invitation.latestDeliveryState === "not_sent") {
+    return { kind: "action", action: "send", label: "Send", resend: false }
+  }
+  if (
+    invitation.latestDeliveryState === "failed" ||
+    invitation.latestDeliveryState === "delayed"
+  ) {
+    return { kind: "action", action: "retry", label: "Retry", resend: false }
+  }
+  if (
+    invitation.latestDeliveryState === "sent" ||
+    invitation.latestDeliveryState === "delivered"
+  ) {
+    return { kind: "action", action: "send", label: "Resend", resend: true }
+  }
+  return {
+    kind: "status",
+    copy: "This invitation cannot be sent in its current delivery state.",
+  }
 }
 
 function GuestActions({
   invitation,
+  invitationsCanBeSent,
   onEdit,
   onRequestAction,
+  sendingUnavailableCopy,
 }: {
   invitation: Invitation
+  invitationsCanBeSent: boolean
   onEdit: (invitation: Invitation, trigger: HTMLElement | null) => void
   onRequestAction: (action: PendingActionRequest) => void
+  sendingUnavailableCopy: string
 }) {
   const editRef = useRef<HTMLButtonElement>(null)
   const sendRef = useRef<HTMLButtonElement>(null)
-  const action = rowAction(invitation)
+  const action = rowAction(
+    invitation,
+    invitationsCanBeSent,
+    sendingUnavailableCopy
+  )
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -305,6 +330,29 @@ function GuestActions({
 
 export function EventGuests() {
   const event = useEventWorkspace()
+  const [currentTime, setCurrentTime] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = window.setInterval(
+      () => setCurrentTime(Date.now()),
+      60_000
+    )
+    return () => window.clearInterval(interval)
+  }, [])
+  const invitationsCanBeSent =
+    event.status === "published" &&
+    Boolean(event.shareToken) &&
+    event.orderDeadlineAt !== undefined &&
+    event.orderDeadlineAt > currentTime
+  const sendingUnavailableCopy =
+    event.status === "archived"
+      ? "Archived events cannot send invitations."
+      : event.status === "closed"
+        ? "Reopen this event before sending invitations."
+        : event.status === "published"
+          ? !event.shareToken
+            ? "Add a private event link before sending invitations."
+            : "The ordering deadline has passed. Reopen ordering before sending invitations."
+          : "Publish this event before sending invitations."
   const sendInvitations = useMutation(api.eventInvitations.send)
   const retryInvitations = useMutation(api.eventInvitations.retry)
   const [search, setSearch] = useState("")
@@ -344,14 +392,17 @@ export function EventGuests() {
     (invitation) => invitation.latestDeliveryState === "not_sent"
   )
   const canBulkSend =
+    invitationsCanBeSent &&
     selectedInvitations.length > 0 &&
     selectedInvitations.every((item) => item.latestDeliveryState === "not_sent")
   const canBulkRetry =
+    invitationsCanBeSent &&
     selectedInvitations.length > 0 &&
     selectedInvitations.every((item) =>
       ["failed", "delayed"].includes(item.latestDeliveryState)
     )
   const canBulkResend =
+    invitationsCanBeSent &&
     selectedInvitations.length > 0 &&
     selectedInvitations.every((item) =>
       ["sent", "delivered"].includes(item.latestDeliveryState)
@@ -359,21 +410,23 @@ export function EventGuests() {
   const selectionHelp =
     selectedInvitations.length === 0
       ? null
-      : canBulkSend
-        ? "These guests are ready to receive the private event link."
-        : canBulkRetry
-          ? "These invitations need another delivery attempt."
-          : canBulkResend
-            ? "Resending sends another email to each selected guest."
-            : selectedInvitations.every(
-                  (item) => item.latestDeliveryState === "queued"
-                )
-              ? "These invitations are already sending. Wait for their delivery status to update."
+      : !invitationsCanBeSent
+        ? sendingUnavailableCopy
+        : canBulkSend
+          ? "These guests are ready to receive the private event link."
+          : canBulkRetry
+            ? "These invitations need another delivery attempt."
+            : canBulkResend
+              ? "Resending sends another email to each selected guest."
               : selectedInvitations.every(
-                    (item) => item.latestDeliveryState === "suppressed"
+                    (item) => item.latestDeliveryState === "queued"
                   )
-                ? "Correct these email addresses before sending another invitation."
-                : "This selection includes incompatible invitation states. Select guests that are ready to send, retry, or resend together."
+                ? "These invitations are already sending. Wait for their delivery status to update."
+                : selectedInvitations.every(
+                      (item) => item.latestDeliveryState === "suppressed"
+                    )
+                  ? "Correct these email addresses before sending another invitation."
+                  : "This selection includes incompatible invitation states. Select guests that are ready to send, retry, or resend together."
   function resetPagination() {
     setCursor(null)
     setPreviousCursors([])
@@ -433,21 +486,7 @@ export function EventGuests() {
               requestId: pendingDialog.requestId,
               resend: pendingDialog.resend,
             })
-      const queued = result.filter(
-        (item) => item.outcome === "queued" || item.outcome === "retried"
-      ).length
-      const blocked = result.filter((item) => item.outcome === "blocked").length
-      setFeedback({
-        type: blocked > 0 ? "error" : "success",
-        title:
-          blocked > 0
-            ? "Some guests need attention"
-            : "Invitation request saved",
-        message:
-          blocked > 0
-            ? `${queued} invitation${queued === 1 ? " was" : "s were"} queued. ${blocked} guest${blocked === 1 ? " needs" : "s need"} an email correction before sending again.`
-            : `${queued} invitation${queued === 1 ? " was" : "s were"} queued for delivery.`,
-      })
+      setFeedback(invitationRequestFeedback(result))
       setSelectedIds(new Set())
       setPendingDialog(null)
     } catch {
@@ -517,6 +556,16 @@ export function EventGuests() {
           <AlertTitle>{feedback.title}</AlertTitle>
           <AlertDescription className="text-base">
             {feedback.message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {!invitationsCanBeSent ? (
+        <Alert className="text-base">
+          <CircleAlertIcon aria-hidden="true" />
+          <AlertTitle>Invitation sending is unavailable</AlertTitle>
+          <AlertDescription className="text-base">
+            {sendingUnavailableCopy}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -782,8 +831,10 @@ export function EventGuests() {
                       <TableCell>
                         <GuestActions
                           invitation={invitation}
+                          invitationsCanBeSent={invitationsCanBeSent}
                           onEdit={openEditor}
                           onRequestAction={openActionDialog}
+                          sendingUnavailableCopy={sendingUnavailableCopy}
                         />
                       </TableCell>
                     </TableRow>
@@ -836,8 +887,10 @@ export function EventGuests() {
                   </p>
                   <GuestActions
                     invitation={invitation}
+                    invitationsCanBeSent={invitationsCanBeSent}
                     onEdit={openEditor}
                     onRequestAction={openActionDialog}
+                    sendingUnavailableCopy={sendingUnavailableCopy}
                   />
                 </CardContent>
               </Card>

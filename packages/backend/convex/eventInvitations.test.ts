@@ -270,6 +270,34 @@ describe("event invitations", () => {
         rows: rows.slice(0, 1),
       })
     ).rejects.toThrow("chunk is invalid")
+    await expect(
+      client.mutation(api.eventInvitations.importBatch, {
+        eventId,
+        importId: "import-duplicate-row-number",
+        chunkIndex: 0,
+        source: "csv",
+        rows: [
+          { rowNumber: 2, name: "Ada", email: "ada@example.com" },
+          { rowNumber: 2, name: "Ola", email: "ola@example.com" },
+        ],
+      })
+    ).rejects.toThrow("row numbers must be unique")
+    await client.mutation(api.eventInvitations.importBatch, {
+      eventId,
+      importId: "import-overlapping-row-number",
+      chunkIndex: 0,
+      source: "csv",
+      rows: [{ rowNumber: 2, name: "Ada", email: "ada@example.com" }],
+    })
+    await expect(
+      client.mutation(api.eventInvitations.importBatch, {
+        eventId,
+        importId: "import-overlapping-row-number",
+        chunkIndex: 1,
+        source: "csv",
+        rows: [{ rowNumber: 2, name: "Ola", email: "ola@example.com" }],
+      })
+    ).rejects.toThrow("overlap an earlier")
   })
 
   it("continues bounded receipt cleanup until expired imports are drained", async () => {
@@ -422,6 +450,85 @@ describe("event invitations", () => {
     })
     expect(await deliveryCount(t, eventId, "delayed")).toBe(0)
     expect(await deliveryCount(t, eventId, "queued")).toBe(1)
+  })
+
+  it("does not retry a failed invitation after the event closes", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    await publishForSending(t, eventId)
+    const invitation = await client.mutation(api.eventInvitations.add, {
+      eventId,
+      name: "Guest",
+      email: "guest@example.com",
+    })
+    await client.mutation(api.eventInvitations.send, {
+      eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-0025",
+    })
+    const current = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    await t.run(async (ctx) => {
+      await ctx.db.patch(current!.currentNotificationId!, { status: "failed" })
+      await ctx.db.patch(eventId, { status: "closed" })
+    })
+    await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
+      notificationId: current!.currentNotificationId!,
+      status: "failed",
+    })
+    await expect(
+      client.mutation(api.eventInvitations.retry, {
+        eventId,
+        invitationIds: [invitation._id],
+        requestId: "retry-0025",
+      })
+    ).rejects.toThrow("Publish the event")
+  })
+
+  it("does not send or retry invitations after the ordering deadline", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    await publishForSending(t, eventId)
+    const invitation = await client.mutation(api.eventInvitations.add, {
+      eventId,
+      name: "Guest",
+      email: "guest@example.com",
+    })
+    await t.run(async (ctx) => {
+      await ctx.db.patch(eventId, { orderDeadlineAt: Date.now() - 1 })
+    })
+    await expect(
+      client.mutation(api.eventInvitations.send, {
+        eventId,
+        invitationIds: [invitation._id],
+        requestId: "send-0026",
+      })
+    ).rejects.toThrow("ordering deadline")
+    await t.run(async (ctx) => {
+      await ctx.db.patch(eventId, { orderDeadlineAt: Date.now() + DAY })
+    })
+    await client.mutation(api.eventInvitations.send, {
+      eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-0027",
+    })
+    const current = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    await t.run(async (ctx) => {
+      await ctx.db.patch(current!.currentNotificationId!, { status: "failed" })
+      await ctx.db.patch(eventId, { orderDeadlineAt: Date.now() - 1 })
+    })
+    await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
+      notificationId: current!.currentNotificationId!,
+      status: "failed",
+    })
+    await expect(
+      client.mutation(api.eventInvitations.retry, {
+        eventId,
+        invitationIds: [invitation._id],
+        requestId: "retry-0026",
+      })
+    ).rejects.toThrow("ordering deadline")
   })
 
   it("ignores an older logical notification when projecting a late provider update", async () => {
