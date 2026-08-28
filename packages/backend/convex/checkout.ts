@@ -210,6 +210,22 @@ async function requireProof(
   return proof
 }
 
+async function clearDraftProofForChangedTotal(
+  ctx: MutationCtx,
+  order: Doc<"orders">,
+  nextTotalMinor: number
+) {
+  if (nextTotalMinor === order.totalMinor || !order.currentProofId) return {}
+
+  const proof = await ctx.db.get(order.currentProofId)
+  if (proof?.status === "active")
+    await ctx.db.patch(proof._id, {
+      status: "invalidated",
+      invalidatedAt: Date.now(),
+    })
+  return { currentProofId: undefined }
+}
+
 /**
  * A storage ID is private data, but it is still an identifier supplied by the
  * browser after a direct upload. Do not let a receipt claim adopt a file that
@@ -508,6 +524,7 @@ export const saveDraft = mutation({
       })
     const oldLines = await getExistingLines(ctx, order._id)
     if (args.lines.length === 0) {
+      const proofPatch = await clearDraftProofForChangedTotal(ctx, order, 0)
       for (const line of oldLines) await ctx.db.delete(line._id)
       await ctx.db.patch(order._id, {
         itemSubtotalMinor: 0,
@@ -521,6 +538,7 @@ export const saveDraft = mutation({
         fulfillmentInstructions: undefined,
         fulfillmentRequiredFields: undefined,
         fulfillmentDetails: undefined,
+        ...proofPatch,
         proofRequired: false,
         updatedAt: Date.now(),
       })
@@ -561,12 +579,18 @@ export const saveDraft = mutation({
       )
       if (!Number.isSafeInteger(itemSubtotalMinor))
         throw new ConvexError("Order total is too large.")
+      const proofPatch = await clearDraftProofForChangedTotal(
+        ctx,
+        order,
+        itemSubtotalMinor
+      )
       await ctx.db.patch(order._id, {
         itemSubtotalMinor,
         totalMinor: itemSubtotalMinor,
         fulfillmentFeeMinor: 0,
         ...normalizeGuest(args.guestName, args.guestPhone),
         reviewedAt: args.reviewed ? Date.now() : undefined,
+        ...proofPatch,
         proofRequired: false,
         updatedAt: Date.now(),
       })
@@ -582,11 +606,17 @@ export const saveDraft = mutation({
       validateRequired: false,
     })
     const { lines: snapshotLines, ...snapshotOrder } = snapshot
+    const proofPatch = await clearDraftProofForChangedTotal(
+      ctx,
+      order,
+      snapshot.totalMinor
+    )
     const patch = {
       ...snapshotOrder,
       currency: event.currency,
       ...normalizeGuest(args.guestName, args.guestPhone),
       reviewedAt: args.reviewed ? Date.now() : undefined,
+      ...proofPatch,
       proofRequired: false,
       updatedAt: Date.now(),
     }
@@ -639,6 +669,10 @@ export const submit = mutation({
       fulfillment: args.fulfillment as FulfillmentInput,
     })
     const { lines: snapshotLines, ...snapshotOrder } = snapshot
+    if (snapshot.totalMinor !== order.totalMinor)
+      throw new ConvexError(
+        "Save your updated order and upload a new payment receipt because the total changed."
+      )
     const proof = await requireProof(ctx, {
       proofId: args.proofId,
       eventId: event._id,

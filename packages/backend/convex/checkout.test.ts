@@ -120,9 +120,10 @@ async function proofFor(
     const storageId = await ctx.storage.store(
       new Blob(["%PDF-1.4\n%%EOF"], { type: "application/pdf" })
     )
-    return await ctx.db.insert("paymentProofs", {
+    const proofId = await ctx.db.insert("paymentProofs", {
       eventId: order.eventId,
       attendeeId: order.attendeeId,
+      orderId,
       storageId,
       contentType: "application/pdf",
       size: 8,
@@ -131,6 +132,16 @@ async function proofFor(
       status: "active",
       createdAt: Date.now(),
     })
+    if (order.lifecycle === "draft") {
+      if (order.currentProofId) {
+        await ctx.db.patch(order.currentProofId, {
+          status: "invalidated",
+          invalidatedAt: Date.now(),
+        })
+      }
+      await ctx.db.patch(orderId, { currentProofId: proofId })
+    }
+    return proofId
   })
 }
 
@@ -409,6 +420,72 @@ describe("guest checkout", () => {
         .take(10)
       expect(lines.every((line) => line.lifecycle === "cancelled")).toBe(true)
     })
+  })
+
+  it("invalidates a draft receipt when the total changes and blocks a direct-submit bypass", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.itemId, { inventoryTotal: 2 })
+    })
+    const draft = await draftFor(t, event, "draft-total@example.com")
+    const changedLines = [{ itemId: event.itemId, quantity: 2 }]
+
+    await draft.guest.client.mutation(api.checkout.saveDraft, {
+      shareToken: event.shareToken,
+      lines: [{ itemId: event.itemId, quantity: 1 }],
+      fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+      guestName: "Ada",
+    })
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get(draft.proofId)).toMatchObject({
+        status: "active",
+      })
+      expect(await ctx.db.get(draft.orderId)).toMatchObject({
+        currentProofId: draft.proofId,
+        totalMinor: 10_500,
+      })
+    })
+
+    await expect(
+      draft.guest.client.mutation(api.checkout.submit, {
+        ...submitArgs(event, draft.proofId, "draft-total-direct-submit"),
+        lines: changedLines,
+      })
+    ).rejects.toThrow("total changed")
+
+    await draft.guest.client.mutation(api.checkout.saveDraft, {
+      shareToken: event.shareToken,
+      lines: changedLines,
+      fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+      guestName: "Ada",
+    })
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get(draft.proofId)).toMatchObject({
+        status: "invalidated",
+      })
+      const order = await ctx.db.get(draft.orderId)
+      expect(order).toMatchObject({ totalMinor: 20_500 })
+      expect(order?.currentProofId).toBeUndefined()
+    })
+    await expect(
+      draft.guest.client.mutation(api.checkout.submit, {
+        ...submitArgs(event, draft.proofId, "draft-total-old-proof"),
+        lines: changedLines,
+      })
+    ).rejects.toThrow("valid payment receipt")
+
+    const replacementProof = await proofFor(
+      t,
+      draft.orderId,
+      draft.guest.userId
+    )
+    await expect(
+      draft.guest.client.mutation(api.checkout.submit, {
+        ...submitArgs(event, replacementProof, "draft-total-new-proof"),
+        lines: changedLines,
+      })
+    ).resolves.toBe(draft.orderId)
   })
 
   it("requires a replacement proof only when a pending edit changes its total", async () => {

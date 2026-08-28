@@ -354,16 +354,22 @@ export function OrderFlow({
 
   useEffect(() => {
     if (
-      checkout?.order?.paymentStatus !== "pending_review" ||
+      (checkout?.order?.lifecycle !== "draft" &&
+        checkout?.order?.paymentStatus !== "pending_review") ||
       proposal.totalMinor === checkout.order.totalMinor ||
       proofId !== checkout.order.currentProofId
     )
       return
     setProofId(null)
+    setFileName(null)
+    setFileError(
+      "Upload a new payment receipt because the order total changed."
+    )
     if (pendingEditKey) {
       const saved = window.sessionStorage.getItem(pendingEditKey)
       const edit = saved ? (JSON.parse(saved) as Record<string, unknown>) : {}
       delete edit.proofId
+      delete edit.fileName
       window.sessionStorage.setItem(pendingEditKey, JSON.stringify(edit))
     }
   }, [checkout?.order, pendingEditKey, proofId, proposal.totalMinor])
