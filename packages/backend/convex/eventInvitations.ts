@@ -1,4 +1,3 @@
-import { TableAggregate } from "@convex-dev/aggregate"
 import { ConvexError, v } from "convex/values"
 import {
   paginationOptsValidator,
@@ -6,10 +5,20 @@ import {
 } from "convex/server"
 
 import { authComponent } from "./auth"
-import { requireEditableEvent, requireOwnedEvent } from "./eventModel"
+import {
+  MAX_EVENT_INVITATIONS,
+  MAX_EVENT_INVITATION_IMPORT_RECEIPTS,
+  MAX_EVENT_INVITATION_SEND_RECEIPTS,
+  requireEditableEvent,
+  requireOwnedEvent,
+} from "./eventModel"
+import {
+  invitationActivityCounts,
+  invitationDeliveryCounts,
+} from "./eventInvitationAggregates"
 import { createNotification } from "./notifications"
-import { internal, components } from "./_generated/api"
-import type { DataModel, Doc, Id } from "./_generated/dataModel"
+import { internal } from "./_generated/api"
+import type { Doc, Id } from "./_generated/dataModel"
 import {
   internalMutation,
   mutation,
@@ -87,26 +96,6 @@ const sendResult = v.object({
 
 type Invitation = Doc<"eventInvitations">
 
-const invitationDeliveryCounts = new TableAggregate<{
-  Namespace: Id<"events">
-  Key: string
-  DataModel: DataModel
-  TableName: "eventInvitations"
-}>(components.invitationDeliveryCounts, {
-  namespace: (doc) => doc.eventId,
-  sortKey: (doc) => doc.latestDeliveryState,
-})
-
-const invitationActivityCounts = new TableAggregate<{
-  Namespace: Id<"events">
-  Key: string
-  DataModel: DataModel
-  TableName: "eventInvitations"
-}>(components.invitationActivityCounts, {
-  namespace: (doc) => doc.eventId,
-  sortKey: (doc) => doc.activity,
-})
-
 function normalizeEmail(value: string) {
   const email = value.trim().toLowerCase()
   if (email.length > 320 || !EMAIL_PATTERN.test(email)) {
@@ -157,6 +146,46 @@ async function insertInvitation(
     invitationActivityCounts.insert(ctx, created),
   ])
   return created
+}
+
+async function invitationCapacity(ctx: MutationCtx, eventId: Id<"events">) {
+  return await invitationDeliveryCounts.count(ctx, { namespace: eventId })
+}
+
+async function requireInvitationCapacity(
+  ctx: MutationCtx,
+  eventId: Id<"events">
+) {
+  if ((await invitationCapacity(ctx, eventId)) >= MAX_EVENT_INVITATIONS)
+    throw new ConvexError(
+      `An event can have up to ${MAX_EVENT_INVITATIONS} guest invitations.`
+    )
+}
+
+async function requireImportReceiptCapacity(
+  ctx: MutationCtx,
+  eventId: Id<"events">
+) {
+  const receipts = await ctx.db
+    .query("eventInvitationImportChunks")
+    .withIndex("by_eventId_and_importId_and_chunkIndex", (q) =>
+      q.eq("eventId", eventId)
+    )
+    .take(MAX_EVENT_INVITATION_IMPORT_RECEIPTS)
+  if (receipts.length >= MAX_EVENT_INVITATION_IMPORT_RECEIPTS)
+    throw new ConvexError("Too many recent import receipts for this event.")
+}
+
+async function requireSendReceiptCapacity(
+  ctx: MutationCtx,
+  eventId: Id<"events">
+) {
+  const receipts = await ctx.db
+    .query("eventInvitationSendRequests")
+    .withIndex("by_eventId_and_requestId", (q) => q.eq("eventId", eventId))
+    .take(MAX_EVENT_INVITATION_SEND_RECEIPTS)
+  if (receipts.length >= MAX_EVENT_INVITATION_SEND_RECEIPTS)
+    throw new ConvexError("Too many recent send requests for this event.")
 }
 
 async function replaceInvitation(
@@ -298,6 +327,7 @@ export const add = mutation({
       .unique()
     if (existing)
       throw new ConvexError("This email address is already on the guest list.")
+    await requireInvitationCapacity(ctx, args.eventId)
     const now = Date.now()
     return invitationView(
       await insertInvitation(ctx, {
@@ -382,6 +412,9 @@ export const importBatch = mutation({
       new Set(args.rows.map((row) => row.rowNumber)).size !== args.rows.length
     )
       throw new ConvexError("Import row numbers must be unique.")
+    await requireImportReceiptCapacity(ctx, args.eventId)
+    let remainingInvitationCapacity =
+      MAX_EVENT_INVITATIONS - (await invitationCapacity(ctx, args.eventId))
     const earlierChunks = await ctx.db
       .query("eventInvitationImportChunks")
       .withIndex("by_eventId_and_importId_and_chunkIndex", (q) =>
@@ -434,6 +467,14 @@ export const importBatch = mutation({
         })
         continue
       }
+      if (remainingInvitationCapacity <= 0) {
+        outcomes.push({
+          rowNumber: row.rowNumber,
+          outcome: "invalid",
+          error: `This event can have up to ${MAX_EVENT_INVITATIONS} guest invitations.`,
+        })
+        continue
+      }
       const now = Date.now()
       const invitation = await insertInvitation(ctx, {
         eventId: args.eventId,
@@ -453,6 +494,7 @@ export const importBatch = mutation({
         outcome: "created",
         invitationId: invitation._id,
       })
+      remainingInvitationCapacity -= 1
     }
     const now = Date.now()
     await ctx.db.insert("eventInvitationImportChunks", {
@@ -612,6 +654,7 @@ export const send = mutation({
     )
     if (replay) return replay
     requireInvitationDeliveryOpen(event)
+    await requireSendReceiptCapacity(ctx, args.eventId)
     const owner = await authComponent.getAuthUser(ctx)
     const results: Array<{
       invitationId: Id<"eventInvitations">
@@ -698,6 +741,7 @@ export const retry = mutation({
     )
     if (replay) return replay
     requireInvitationDeliveryOpen(event)
+    await requireSendReceiptCapacity(ctx, args.eventId)
     const results: Array<{
       invitationId: Id<"eventInvitations">
       outcome: "queued" | "retried" | "already_sent" | "blocked" | "not_found"

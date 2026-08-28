@@ -118,6 +118,18 @@ async function deliveryCount(t: Test, eventId: Id<"events">, state: string) {
   )
 }
 
+async function activityCount(t: Test, eventId: Id<"events">, state: string) {
+  return await t.run(async (ctx) =>
+    invitationActivityCounts.count(ctx, {
+      namespace: eventId,
+      bounds: {
+        lower: { key: state, inclusive: true },
+        upper: { key: state, inclusive: true },
+      },
+    })
+  )
+}
+
 async function deliveryAttemptCount(
   t: Test,
   notificationId: Id<"notifications">
@@ -155,6 +167,114 @@ describe("event invitations", () => {
         email: "guest@example.com",
       })
     ).rejects.toThrow("Event not found")
+  })
+
+  it("removes bounded draft invitation data and its aggregate namespaces", async () => {
+    const t = createTest()
+    const { client: owner } = await createUser(t, "owner@example.com")
+    const { client: other } = await createUser(t, "other@example.com")
+    const eventId = await createEvent(owner)
+    const manual = await owner.mutation(api.eventInvitations.add, {
+      eventId,
+      name: "Manual guest",
+      email: "manual@example.com",
+    })
+    const imported = await owner.mutation(api.eventInvitations.importBatch, {
+      eventId,
+      importId: "draft-delete-import",
+      chunkIndex: 0,
+      source: "csv",
+      rows: [
+        { rowNumber: 2, name: "Imported guest", email: "import@example.com" },
+      ],
+    })
+    const importedInvitationId = imported.outcomes[0]!.invitationId!
+    const now = Date.now()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("eventInvitationSendRequests", {
+        eventId,
+        requestId: "draft-delete-send",
+        kind: "send",
+        resend: false,
+        invitationIds: [manual._id, importedInvitationId],
+        results: [
+          { invitationId: manual._id, outcome: "already_sent" },
+          { invitationId: importedInvitationId, outcome: "already_sent" },
+        ],
+        createdAt: now,
+        expiresAt: now + DAY,
+      })
+      expect(await ctx.db.query("notificationDeliveries").take(1)).toEqual([])
+    })
+    expect(await deliveryCount(t, eventId, "not_sent")).toBe(2)
+    expect(await activityCount(t, eventId, "not_started")).toBe(2)
+    await expect(
+      other.mutation(api.events.remove, { eventId })
+    ).resolves.toBeNull()
+    expect(await deliveryCount(t, eventId, "not_sent")).toBe(2)
+
+    await owner.mutation(api.events.remove, { eventId })
+
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get(eventId)).toBeNull()
+      expect(
+        await ctx.db
+          .query("eventInvitations")
+          .withIndex("by_eventId_and_createdAt", (q) =>
+            q.eq("eventId", eventId)
+          )
+          .take(1)
+      ).toEqual([])
+      expect(
+        await ctx.db
+          .query("eventInvitationImportChunks")
+          .withIndex("by_eventId_and_importId_and_chunkIndex", (q) =>
+            q.eq("eventId", eventId)
+          )
+          .take(1)
+      ).toEqual([])
+      expect(
+        await ctx.db
+          .query("eventInvitationSendRequests")
+          .withIndex("by_eventId_and_requestId", (q) =>
+            q.eq("eventId", eventId)
+          )
+          .take(1)
+      ).toEqual([])
+      expect(
+        await ctx.db
+          .query("notifications")
+          .withIndex("by_eventRef_and_updatedAt", (q) =>
+            q.eq("eventRef", `${eventId}`)
+          )
+          .take(1)
+      ).toEqual([])
+      expect(await ctx.db.query("notificationDeliveries").take(1)).toEqual([])
+    })
+    expect(await deliveryCount(t, eventId, "not_sent")).toBe(0)
+    expect(await activityCount(t, eventId, "not_started")).toBe(0)
+  })
+
+  it("keeps invitation data when a non-draft event is deleted", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    const invitation = await client.mutation(api.eventInvitations.add, {
+      eventId,
+      name: "Guest",
+      email: "guest@example.com",
+    })
+    await t.run(async (ctx) => {
+      await ctx.db.patch(eventId, { status: "published" })
+    })
+
+    await expect(
+      client.mutation(api.events.remove, { eventId })
+    ).rejects.toThrow("Only draft events")
+    expect(
+      await t.run(async (ctx) => ctx.db.get(invitation._id))
+    ).not.toBeNull()
+    expect(await deliveryCount(t, eventId, "not_sent")).toBe(1)
   })
 
   it("normalizes emails, prevents concurrent duplicates, and never sends on creation", async () => {
