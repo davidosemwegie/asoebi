@@ -44,5 +44,5 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test backend
-        run: pnpm --filter @workspace/backend test
+      - name: Test
+        run: pnpm test

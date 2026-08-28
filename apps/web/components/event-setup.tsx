@@ -617,6 +617,9 @@ function EventDetailsForm() {
                 <FieldError id="setup-contact-error">
                   {errors.contact}
                 </FieldError>
+                <FieldDescription className="text-base">
+                  This contact appears on the private event page.
+                </FieldDescription>
               </Field>
             </div>
             <Field>

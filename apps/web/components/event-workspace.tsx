@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import type { FunctionReturnType } from "convex/server"
 import { useQuery } from "convex/react"
 import { SearchXIcon } from "lucide-react"
@@ -19,6 +19,13 @@ import {
   EmptyTitle,
 } from "@workspace/ui/components/empty"
 import { Skeleton } from "@workspace/ui/components/skeleton"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
 import {
   Tabs,
   TabsContent,
@@ -46,6 +53,7 @@ export function EventWorkspace({
   eventId: string
 }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [queryNow, setQueryNow] = useState(Date.now)
   const event = useQuery(api.events.get, { eventId, now: queryNow })
 
@@ -92,9 +100,24 @@ export function EventWorkspace({
 
   const activeTab = pathname.endsWith("/catalog")
     ? "items"
-    : pathname.endsWith("/setup")
-      ? "setup"
-      : "overview"
+    : pathname.endsWith("/guests")
+      ? "guests"
+      : pathname.endsWith("/orders")
+        ? "orders"
+        : pathname.endsWith("/setup")
+          ? "setup"
+          : "overview"
+  const sections = [
+    { value: "overview", label: "Overview", href: `/events/${event._id}` },
+    { value: "items", label: "Items", href: `/events/${event._id}/catalog` },
+    { value: "guests", label: "Guests", href: `/events/${event._id}/guests` },
+    { value: "orders", label: "Orders", href: `/events/${event._id}/orders` },
+    {
+      value: "setup",
+      label: "Event setup",
+      href: `/events/${event._id}/setup`,
+    },
+  ] as const
 
   return (
     <EventWorkspaceContext.Provider value={event}>
@@ -115,7 +138,42 @@ export function EventWorkspace({
         </header>
 
         <Tabs value={activeTab}>
-          <div className="pb-1">
+          <div className="pb-1 md:hidden">
+            <label
+              id="event-section-label"
+              htmlFor="event-section-select"
+              className="mb-2 block text-base font-medium"
+            >
+              Event section
+            </label>
+            <Select
+              value={activeTab}
+              onValueChange={(value) => {
+                const section = sections.find((item) => item.value === value)
+                if (section) router.push(section.href)
+              }}
+            >
+              <SelectTrigger
+                id="event-section-select"
+                aria-labelledby="event-section-label"
+                className="min-h-12 w-full text-base"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sections.map((section) => (
+                  <SelectItem
+                    key={section.value}
+                    value={section.value}
+                    className="min-h-11 text-base"
+                  >
+                    {section.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="hidden pb-1 md:block">
             <TabsList
               variant="line"
               aria-label="Event sections"
@@ -139,17 +197,19 @@ export function EventWorkspace({
               </TabsTrigger>
               <TabsTrigger
                 value="guests"
-                disabled
+                nativeButton={false}
+                render={<Link href={`/events/${event._id}/guests`} />}
                 className="min-h-11 px-3 text-base"
               >
-                Guests <span className="text-base">Coming soon</span>
+                Guests
               </TabsTrigger>
               <TabsTrigger
                 value="orders"
-                disabled
+                nativeButton={false}
+                render={<Link href={`/events/${event._id}/orders`} />}
                 className="min-h-11 px-3 text-base"
               >
-                Orders <span className="text-base">Coming soon</span>
+                Orders
               </TabsTrigger>
               <TabsTrigger
                 value="setup"

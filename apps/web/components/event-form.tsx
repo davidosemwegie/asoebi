@@ -170,6 +170,9 @@ export function EventForm({
                 required
                 disabled={isPending}
               />
+              <FieldDescription>
+                This contact will appear on the private event page.
+              </FieldDescription>
             </Field>
           </div>
 

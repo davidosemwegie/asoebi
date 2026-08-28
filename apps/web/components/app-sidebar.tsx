@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import type { Preloaded } from "convex/react"
-import { CalendarDaysIcon, Settings2Icon, SparklesIcon } from "lucide-react"
+import { HouseIcon, Settings2Icon, SparklesIcon } from "lucide-react"
 import { usePreloadedAuthQuery } from "@convex-dev/better-auth/nextjs/client"
 
 import { NavMain } from "@/components/nav-main"
@@ -24,9 +24,9 @@ import {
 const data = {
   navMain: [
     {
-      title: "Events",
+      title: "Home",
       url: "/",
-      icon: CalendarDaysIcon,
+      icon: HouseIcon,
     },
     {
       title: "Settings",

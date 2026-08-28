@@ -175,18 +175,20 @@ describe("event foundation", () => {
       } as never)
     ).rejects.toThrow()
     await expect(
-      client.query(api.events.getByShareToken, {
+      client.query(api.sharedEvents.getLanding, {
         shareToken: first!.shareToken!,
+        now: Date.now(),
       })
     ).resolves.toBeNull()
 
     await makeReady(client, firstId)
     await client.mutation(api.events.publish, { eventId: firstId })
     await expect(
-      client.query(api.events.getByShareToken, {
+      client.query(api.sharedEvents.getLanding, {
         shareToken: first!.shareToken!,
+        now: Date.now(),
       })
-    ).resolves.toEqual({ eventId: firstId, status: "published" })
+    ).resolves.toMatchObject({ name: validEvent.name })
   })
 
   it("keeps legacy date-only rows readable and explicitly publish-ineligible", async () => {

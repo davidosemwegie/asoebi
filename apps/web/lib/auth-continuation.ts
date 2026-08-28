@@ -18,6 +18,31 @@ function hasControlCharacters(value: string) {
   return false
 }
 
+function hasUnsafeEncodedPath(value: string) {
+  let decoded = value
+
+  for (let depth = 0; depth < 6; depth += 1) {
+    if (
+      decoded.startsWith("//") ||
+      decoded.includes("\\") ||
+      hasControlCharacters(decoded)
+    ) {
+      return true
+    }
+
+    let next: string
+    try {
+      next = decodeURIComponent(decoded)
+    } catch {
+      return true
+    }
+    if (next === decoded) return false
+    decoded = next
+  }
+
+  return true
+}
+
 export function getSafeAuthContinuation(value: string | string[] | undefined) {
   if (typeof value !== "string" || value.length === 0 || value.length > 2048) {
     return DEFAULT_AUTH_CONTINUATION
@@ -36,6 +61,9 @@ export function getSafeAuthContinuation(value: string | string[] | undefined) {
   try {
     const baseUrl = new URL("https://asoebi.invalid")
     const candidate = new URL(value, baseUrl)
+    if (hasUnsafeEncodedPath(candidate.pathname)) {
+      return DEFAULT_AUTH_CONTINUATION
+    }
     const decodedPathname = decodeURIComponent(candidate.pathname).toLowerCase()
     const normalizedPathname =
       decodedPathname.length > 1

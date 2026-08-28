@@ -250,12 +250,29 @@ export function VerifyEmailForm({
           </form>
         )}
 
-        <Link
-          href={getAuthHref("/login", safeContinuation)}
-          className={linkClassName}
-        >
-          Go to sign in
-        </Link>
+        {session ? (
+          <div className="space-y-2">
+            <Button
+              nativeButton={false}
+              render={<Link href={safeContinuation} />}
+              variant="outline"
+              className={actionClassName}
+            >
+              Continue for now
+            </Button>
+            <p className="text-base text-pretty text-muted-foreground">
+              You can start an order before verification. You’ll need to verify
+              your email before submitting it later.
+            </p>
+          </div>
+        ) : (
+          <Link
+            href={getAuthHref("/login", safeContinuation)}
+            className={linkClassName}
+          >
+            Go to sign in
+          </Link>
+        )}
       </div>
     </AuthShell>
   )

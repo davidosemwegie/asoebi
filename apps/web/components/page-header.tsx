@@ -12,7 +12,7 @@ import { Separator } from "@workspace/ui/components/separator"
 import { SidebarTrigger } from "@workspace/ui/components/sidebar"
 
 const pageTitles: Record<string, string> = {
-  "/": "Events",
+  "/": "Home",
   "/settings": "Settings",
 }
 
@@ -22,11 +22,15 @@ export function PageHeader() {
     pageTitles[pathname] ??
     (pathname.endsWith("/setup")
       ? "Event setup"
-      : pathname.endsWith("/catalog")
-        ? "Items"
-        : pathname.startsWith("/events/")
-          ? "Event overview"
-          : "Asoebi")
+      : pathname.endsWith("/guests")
+        ? "Guests"
+        : pathname.endsWith("/orders")
+          ? "Orders"
+          : pathname.endsWith("/catalog")
+            ? "Items"
+            : pathname.startsWith("/events/")
+              ? "Event overview"
+              : "Asoebi")
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
