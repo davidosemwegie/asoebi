@@ -338,8 +338,8 @@ export function GuestImport() {
             ) : null}
             <div
               className="flex flex-wrap gap-2"
+              role="status"
               aria-label="Import preview totals"
-              aria-live="polite"
             >
               <Badge variant="secondary" className="h-8 text-sm">
                 {validCount} ready
