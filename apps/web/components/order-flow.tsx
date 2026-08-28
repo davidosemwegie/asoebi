@@ -1070,7 +1070,7 @@ export function OrderFlow({
                   id="payment-receipt"
                   type="file"
                   accept="image/jpeg,image/png,application/pdf"
-                  className="min-h-12 text-lg"
+                  className="min-h-12 text-lg file:h-11 file:px-3 file:text-lg"
                   aria-invalid={Boolean(fileError)}
                   aria-describedby={`${fileError ? "payment-receipt-error " : ""}payment-receipt-guidance`}
                   onChange={(event) =>
