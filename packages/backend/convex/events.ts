@@ -225,23 +225,6 @@ export const get = query({
   },
 })
 
-export const getByShareToken = query({
-  args: { shareToken: v.string() },
-  returns: v.union(
-    v.object({ eventId: v.id("events"), status: eventStatus }),
-    v.null()
-  ),
-  handler: async (ctx, { shareToken }) => {
-    if (!/^[A-Za-z0-9_-]{32}$/.test(shareToken)) return null
-    const event = await ctx.db
-      .query("events")
-      .withIndex("by_shareToken", (q) => q.eq("shareToken", shareToken))
-      .unique()
-    if (!event || !["published", "closed"].includes(event.status)) return null
-    return { eventId: event._id, status: event.status }
-  },
-})
-
 export const update = mutation({
   args: { eventId: v.id("events"), ...eventInput },
   returns: v.null(),

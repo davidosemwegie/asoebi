@@ -77,6 +77,14 @@ export default defineSchema({
       "isHidden",
       "sortOrder",
     ]),
+  eventAttendees: defineTable({
+    eventId: v.id("events"),
+    userId: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_eventId_and_userId", ["eventId", "userId"])
+    .index("by_userId_and_eventId", ["userId", "eventId"]),
   eventPaymentInstructions: defineTable({
     eventId: v.id("events"),
     instructions: v.string(),
