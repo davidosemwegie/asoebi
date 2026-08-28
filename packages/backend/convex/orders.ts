@@ -99,7 +99,13 @@ export const getMine = query({
 /** Safe for typed URLs: malformed, foreign, and unavailable orders are null. */
 export const getMineForConfirmation = query({
   args: { orderId: v.string() },
-  returns: v.any(),
+  returns: v.union(
+    v.object({
+      lifecycle: orderLifecycle,
+      eventShareToken: v.union(v.string(), v.null()),
+    }),
+    v.null()
+  ),
   handler: async (ctx, { orderId }) => {
     const user = await authComponent.getAuthUser(ctx)
     const normalized = ctx.db.normalizeId("orders", orderId)

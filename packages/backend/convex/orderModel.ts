@@ -114,10 +114,9 @@ function normalizeFulfillmentDetails(input: FulfillmentInput) {
 }
 
 function validateRequiredDetails(
-  option: Doc<"fulfillmentOptions">,
+  required: Doc<"fulfillmentOptions">["requiredFields"],
   details: ReturnType<typeof normalizeFulfillmentDetails>
 ) {
-  const required = option.requiredFields
   if (required.kind === "pickup") {
     if (required.pickupContact && !details.pickupContact) {
       throw new ConvexError(
@@ -166,7 +165,11 @@ export async function buildOrderSnapshot(
     throw new ConvexError("Choose an available pickup or delivery option.")
   }
   const details = normalizeFulfillmentDetails(args.fulfillment)
-  if (args.validateRequired !== false) validateRequiredDetails(option, details)
+  const requiredFields = previousKeepsOption
+    ? previousOrder!.fulfillmentRequiredFields!
+    : option.requiredFields
+  if (args.validateRequired !== false)
+    validateRequiredDetails(requiredFields, details)
   const oldByItem = new Map(
     args.previousLines?.map((line) => [line.itemId, line])
   )
@@ -227,9 +230,7 @@ export async function buildOrderSnapshot(
     fulfillmentInstructions: previousKeepsOption
       ? previousOrder!.fulfillmentInstructions
       : option.instructions,
-    fulfillmentRequiredFields: previousKeepsOption
-      ? previousOrder!.fulfillmentRequiredFields!
-      : option.requiredFields,
+    fulfillmentRequiredFields: requiredFields,
     fulfillmentDetails: details,
   }
 }

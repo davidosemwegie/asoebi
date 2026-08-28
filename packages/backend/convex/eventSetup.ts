@@ -205,6 +205,16 @@ export const removeFulfillmentOption = mutation({
     const option = await ctx.db.get(optionId)
     if (!option) return null
     await requireEditableEvent(ctx, option.eventId)
+    const referenced = await ctx.db
+      .query("orders")
+      .withIndex("by_eventId_and_fulfillmentOptionId_and_updatedAt", (q) =>
+        q.eq("eventId", option.eventId).eq("fulfillmentOptionId", optionId)
+      )
+      .take(1)
+    if (referenced.some((order) => order.lifecycle !== "cancelled"))
+      throw new ConvexError(
+        "This pickup or delivery option is used by an active order and cannot be deleted."
+      )
     await ctx.db.delete(optionId)
     return null
   },

@@ -320,8 +320,7 @@ export const get = query({
         : [],
     ])
     const selectedOption =
-      order?.fulfillmentOptionId &&
-      !options.some((option) => option._id === order.fulfillmentOptionId)
+      order?.lifecycle === "submitted" && order.fulfillmentOptionId
         ? await ctx.db.get(order.fulfillmentOptionId)
         : null
     const retainedItems =
@@ -337,12 +336,28 @@ export const get = query({
       ...retainedItems.filter((item): item is Doc<"items"> => item !== null),
     ]
     const visibleOptions = selectedOption
-      ? [...options, selectedOption]
+      ? [
+          ...options.filter((option) => option._id !== selectedOption._id),
+          {
+            ...selectedOption,
+            name: order!.fulfillmentOptionName ?? selectedOption.name,
+            feeMinor: order!.fulfillmentFeeMinor,
+            instructions:
+              order!.fulfillmentInstructions ?? selectedOption.instructions,
+            requiredFields:
+              order!.fulfillmentRequiredFields ?? selectedOption.requiredFields,
+          },
+        ]
       : options
     // Only a live reservation should be added back for the attendee editing it.
     // Draft and rejected orders intentionally reserve no inventory.
     const retainedQuantities = new Map(
       order?.reservationState === "reserved"
+        ? lines.map((line) => [line.itemId, line.quantity])
+        : []
+    )
+    const capturedQuantities = new Map(
+      order?.lifecycle === "submitted"
         ? lines.map((line) => [line.itemId, line.quantity])
         : []
     )
@@ -364,12 +379,15 @@ export const get = query({
         description: item.description,
         unitLabel: item.unitLabel,
         priceMinor: item.priceMinor,
-        availableQuantity: Math.max(
-          0,
-          item.inventoryTotal -
-            item.reservedQuantity +
-            (retainedQuantities.get(item._id) ?? 0)
-        ),
+        availableQuantity:
+          item.isHidden && capturedQuantities.has(item._id)
+            ? capturedQuantities.get(item._id)!
+            : Math.max(
+                0,
+                item.inventoryTotal -
+                  item.reservedQuantity +
+                  (retainedQuantities.get(item._id) ?? 0)
+              ),
       })),
       fulfillmentOptions: visibleOptions,
       paymentInstructions: paymentInstructions?.instructions ?? null,
