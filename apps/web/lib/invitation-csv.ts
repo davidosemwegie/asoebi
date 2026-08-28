@@ -34,13 +34,17 @@ export function normalizeInvitationEmail(value: string) {
   return value.trim().toLowerCase()
 }
 
-function csvRows(input: string, delimiter: string): string[][] {
-  const rows: string[][] = []
+type ParsedRecord = { startLine: number; values: string[] }
+
+function csvRows(input: string, delimiter: string): ParsedRecord[] {
+  const rows: ParsedRecord[] = []
   let cell = ""
   let row: string[] = []
   let inQuotes = false
   let justClosedQuote = false
   let hasCurrentCell = false
+  let physicalLine = 1
+  let recordStartLine = 1
 
   for (let index = 0; index < input.length; index += 1) {
     const character = input[index]
@@ -55,6 +59,12 @@ function csvRows(input: string, delimiter: string): string[][] {
         justClosedQuote = true
       } else {
         cell += character
+        if (
+          character === "\n" ||
+          (character === "\r" && input[index + 1] !== "\n")
+        ) {
+          physicalLine += 1
+        }
       }
       continue
     }
@@ -67,18 +77,22 @@ function csvRows(input: string, delimiter: string): string[][] {
         hasCurrentCell = false
       } else if (character === "\n") {
         row.push(cell)
-        rows.push(row)
+        rows.push({ startLine: recordStartLine, values: row })
         row = []
         cell = ""
         justClosedQuote = false
         hasCurrentCell = false
+        physicalLine += 1
+        recordStartLine = physicalLine
       } else if (character === "\r") {
         row.push(cell)
-        rows.push(row)
+        rows.push({ startLine: recordStartLine, values: row })
         row = []
         cell = ""
         justClosedQuote = false
         hasCurrentCell = false
+        physicalLine += 1
+        recordStartLine = physicalLine
         if (input[index + 1] === "\n") index += 1
       } else {
         throw new Error("A quoted value must end before the next column.")
@@ -97,16 +111,20 @@ function csvRows(input: string, delimiter: string): string[][] {
       hasCurrentCell = false
     } else if (character === "\n") {
       row.push(cell)
-      rows.push(row)
+      rows.push({ startLine: recordStartLine, values: row })
       row = []
       cell = ""
       hasCurrentCell = false
+      physicalLine += 1
+      recordStartLine = physicalLine
     } else if (character === "\r") {
       row.push(cell)
-      rows.push(row)
+      rows.push({ startLine: recordStartLine, values: row })
       row = []
       cell = ""
       hasCurrentCell = false
+      physicalLine += 1
+      recordStartLine = physicalLine
       if (input[index + 1] === "\n") index += 1
     } else {
       cell += character
@@ -120,7 +138,7 @@ function csvRows(input: string, delimiter: string): string[][] {
 
   if (hasCurrentCell || row.length > 0) {
     row.push(cell)
-    rows.push(row)
+    rows.push({ startLine: recordStartLine, values: row })
   }
 
   return rows
@@ -130,12 +148,12 @@ function isBlankRow(row: string[]) {
   return row.every((value) => value.trim() === "")
 }
 
-function findHeaderRow(rows: string[][]) {
-  return rows.findIndex((row) => !isBlankRow(row))
+function findHeaderRow(rows: ParsedRecord[]) {
+  return rows.findIndex((row) => !isBlankRow(row.values))
 }
 
 function validateRows(
-  rows: string[][],
+  rows: ParsedRecord[],
   allowHeaderlessRows: boolean
 ): InvitationImportPreview {
   const headerIndex = findHeaderRow(rows)
@@ -146,7 +164,7 @@ function validateRows(
     }
   }
 
-  const headerRow = rows[headerIndex]
+  const headerRow = rows[headerIndex]?.values
   if (!headerRow) {
     return {
       errors: ["Add a header row with name and email columns."],
@@ -172,8 +190,9 @@ function validateRows(
   const seenEmails = new Set<string>()
 
   for (let index = dataStartIndex; index < rows.length; index += 1) {
-    const values = rows[index]
-    if (!values) continue
+    const record = rows[index]
+    if (!record) continue
+    const { values } = record
     if (isBlankRow(values)) continue
 
     const name = (values[nameIndex] ?? "").trim()
@@ -197,7 +216,7 @@ function validateRows(
       errors: rowErrors,
       name,
       normalizedEmail,
-      rowNumber: index + 1,
+      rowNumber: record.startLine,
     })
   }
 

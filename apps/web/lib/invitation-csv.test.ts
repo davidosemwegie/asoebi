@@ -29,6 +29,25 @@ describe("invitation import parsing", () => {
     ])
   })
 
+  it("keeps physical source line numbers after multiline quoted records", () => {
+    const result = parseInvitationImport(
+      'name,email\n"Ada\nOkafor",ada@example.com\nAnother,ADA@example.com\nBad,not-an-email',
+      "csv"
+    )
+
+    expect(result.rows).toEqual([
+      expect.objectContaining({ rowNumber: 2 }),
+      expect.objectContaining({
+        rowNumber: 4,
+        errors: ["This email is duplicated in this import."],
+      }),
+      expect.objectContaining({
+        rowNumber: 5,
+        errors: ["Enter a valid email address."],
+      }),
+    ])
+  })
+
   it("supports pasted tab-separated rows and header order", () => {
     const result = parseInvitationImport(
       "email\tname\nada@example.com\tAda\n\nola@example.com\tOla",
