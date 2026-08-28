@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "convex/react"
 
 import { useEventWorkspace } from "@/components/event-workspace"
 import { formatMoney } from "@/lib/money"
+import { paymentStatusLabel, progressStatusLabel } from "@/lib/order-status"
 import { api } from "@workspace/backend/convex/_generated/api"
 import type { Id } from "@workspace/backend/convex/_generated/dataModel"
 import {
@@ -61,9 +62,19 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
   const orderKey = orderId as Id<"orders">
   const [message, setMessage] = useState<string>()
   const [historyCursor, setHistoryCursor] = useState<string | null>(null)
+  const [historyPages, setHistoryPages] = useState<Detail["history"]>([])
   const [notificationCursor, setNotificationCursor] = useState<string | null>(
     null
   )
+  const [notificationPages, setNotificationPages] = useState<
+    Array<{
+      _id: Id<"notifications">
+      subject: string
+      status: string
+      latestAttemptNumber: number
+      retryBlockedReason?: string
+    }>
+  >([])
   const detail = useQuery(api.organizerOrders.getDetail, {
     eventId: event._id,
     orderId: orderKey,
@@ -154,7 +165,7 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
         Cancel order
       </Button>
     ) : null
-  const history = historyResult?.page ?? detail.history
+  const history = [...historyPages, ...(historyResult?.page ?? detail.history)]
   return (
     <section className="space-y-5">
       <Button
@@ -187,8 +198,8 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
             {order.guestEmail ? ` (${order.guestEmail})` : ""}
           </p>
           {order.guestPhone ? <p>Phone: {order.guestPhone}</p> : null}
-          <p>Payment: {order.paymentStatus.replaceAll("_", " ")}</p>
-          <p>Progress: {order.progress.replaceAll("_", " ")}</p>
+          <p>Payment: {paymentStatusLabel(order.paymentStatus)}</p>
+          <p>Progress: {progressStatusLabel(order.progress)}</p>
           <p>Pickup or delivery: {order.fulfillmentType ?? "Not selected"}</p>
           <p>Option: {detail.fulfillmentOptionName ?? "Not selected"}</p>
           {detail.fulfillmentInstructions ? (
@@ -265,8 +276,8 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
             {history.map((entry) => (
               <li key={entry._id}>
                 {new Date(entry.createdAt).toLocaleString()}:{" "}
-                {entry.paymentStatus.replaceAll("_", " ")} ·{" "}
-                {entry.progress.replaceAll("_", " ")}
+                {paymentStatusLabel(entry.paymentStatus)} ·{" "}
+                {progressStatusLabel(entry.progress)}
                 {entry.note ? ` — ${entry.note}` : ""}
               </li>
             ))}
@@ -275,7 +286,10 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
             <Button
               variant="outline"
               className="mt-4 min-h-11"
-              onClick={() => setHistoryCursor(historyResult.continueCursor)}
+              onClick={() => {
+                setHistoryPages((pages) => [...pages, ...historyResult.page])
+                setHistoryCursor(historyResult.continueCursor)
+              }}
             >
               More history
             </Button>
@@ -290,32 +304,37 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
           {notifications === undefined ? (
             <p>Loading email status…</p>
           ) : notifications.page.length ? (
-            notifications.page.map((notification) => (
-              <div
-                key={notification._id}
-                className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 last:border-0"
-              >
-                <p>
-                  {notification.subject}:{" "}
-                  {notification.status.replaceAll("_", " ")} (attempt{" "}
-                  {notification.latestAttemptNumber})
-                </p>
-                {notification.status === "delayed" ||
-                notification.status === "failed" ? (
-                  <Button
-                    variant="outline"
-                    className="min-h-11"
-                    onClick={() =>
-                      void run(() =>
-                        retry({ notificationId: notification._id })
-                      )
-                    }
-                  >
-                    Retry email
-                  </Button>
-                ) : null}
-              </div>
-            ))
+            [...notificationPages, ...notifications.page].map(
+              (notification) => (
+                <div
+                  key={notification._id}
+                  className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 last:border-0"
+                >
+                  <p>
+                    {notification.subject}:{" "}
+                    {notification.status.replaceAll("_", " ")} (attempt{" "}
+                    {notification.latestAttemptNumber})
+                  </p>
+                  {(notification.status === "delayed" ||
+                    notification.status === "failed") &&
+                  !notification.retryBlockedReason ? (
+                    <Button
+                      variant="outline"
+                      className="min-h-11"
+                      onClick={() =>
+                        void run(() =>
+                          retry({ notificationId: notification._id })
+                        )
+                      }
+                    >
+                      Retry email
+                    </Button>
+                  ) : notification.retryBlockedReason ? (
+                    <p>{notification.retryBlockedReason}</p>
+                  ) : null}
+                </div>
+              )
+            )
           ) : (
             <p>No email messages have been scheduled for this order.</p>
           )}
@@ -323,9 +342,13 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
             <Button
               variant="outline"
               className="min-h-11"
-              onClick={() =>
+              onClick={() => {
+                setNotificationPages((pages) => [
+                  ...pages,
+                  ...notifications.page,
+                ])
                 setNotificationCursor(notifications.continueCursor)
-              }
+              }}
             >
               More email history
             </Button>

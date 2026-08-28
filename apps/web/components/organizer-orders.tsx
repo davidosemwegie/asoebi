@@ -6,6 +6,7 @@ import { useQuery } from "convex/react"
 import { DownloadIcon, FilterIcon } from "lucide-react"
 import { useEventWorkspace } from "@/components/event-workspace"
 import { formatMoney } from "@/lib/money"
+import { paymentStatusLabel, progressStatusLabel } from "@/lib/order-status"
 import { api } from "@workspace/backend/convex/_generated/api"
 import type { Id } from "@workspace/backend/convex/_generated/dataModel"
 import { Button } from "@workspace/ui/components/button"
@@ -267,10 +268,8 @@ export function OrganizerOrders() {
               <TableRow key={order._id}>
                 <TableCell>{order.reference}</TableCell>
                 <TableCell>{order.guestName}</TableCell>
-                <TableCell>
-                  {order.paymentStatus.replaceAll("_", " ")}
-                </TableCell>
-                <TableCell>{order.progress.replaceAll("_", " ")}</TableCell>
+                <TableCell>{paymentStatusLabel(order.paymentStatus)}</TableCell>
+                <TableCell>{progressStatusLabel(order.progress)}</TableCell>
                 <TableCell>
                   {formatMoney(
                     order.totalMinor,
@@ -299,8 +298,8 @@ export function OrganizerOrders() {
             <CardContent className="space-y-3 pt-5 text-base">
               <p className="font-semibold">{order.reference}</p>
               <p>{order.guestName}</p>
-              <p>Payment: {order.paymentStatus.replaceAll("_", " ")}</p>
-              <p>Progress: {order.progress.replaceAll("_", " ")}</p>
+              <p>Payment: {paymentStatusLabel(order.paymentStatus)}</p>
+              <p>Progress: {progressStatusLabel(order.progress)}</p>
               <p>
                 Total:{" "}
                 {formatMoney(
