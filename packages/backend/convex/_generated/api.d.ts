@@ -15,6 +15,7 @@ import type * as emailCleanup from "../emailCleanup.js";
 import type * as emailProvider from "../emailProvider.js";
 import type * as emailTemplates from "../emailTemplates.js";
 import type * as eventAttendees from "../eventAttendees.js";
+import type * as eventInvitations from "../eventInvitations.js";
 import type * as eventModel from "../eventModel.js";
 import type * as eventSetup from "../eventSetup.js";
 import type * as events from "../events.js";
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   emailProvider: typeof emailProvider;
   emailTemplates: typeof emailTemplates;
   eventAttendees: typeof eventAttendees;
+  eventInvitations: typeof eventInvitations;
   eventModel: typeof eventModel;
   eventSetup: typeof eventSetup;
   events: typeof events;
@@ -77,4 +79,6 @@ export declare const internal: FilterApi<
 export declare const components: {
   betterAuth: import("@convex-dev/better-auth/_generated/component.js").ComponentApi<"betterAuth">;
   resend: import("@convex-dev/resend/_generated/component.js").ComponentApi<"resend">;
+  invitationDeliveryCounts: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"invitationDeliveryCounts">;
+  invitationActivityCounts: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"invitationActivityCounts">;
 };

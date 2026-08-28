@@ -97,7 +97,7 @@ async function hasSuppression(
   return false
 }
 
-async function createNotification(
+export async function createNotification(
   ctx: MutationCtx,
   args: {
     dedupeKey: string
@@ -279,6 +279,13 @@ export const enqueueRendered = internalMutation({
       latestComponentEmailId: componentEmailId,
       updatedAt: now,
     })
+    await ctx.runMutation(
+      internal.eventInvitations.projectNotificationDelivery,
+      {
+        notificationId: notification._id,
+        status: "queued",
+      }
+    )
     await ctx.scheduler.runAfter(
       30 * 60 * 1_000,
       internal.emailActions.reconcileComponentStatus,
@@ -324,6 +331,13 @@ export const markAttemptFailed = internalMutation({
         status: "failed",
         updatedAt: now,
       })
+      await ctx.runMutation(
+        internal.eventInvitations.projectNotificationDelivery,
+        {
+          notificationId: notification._id,
+          status: "failed",
+        }
+      )
     }
     return null
   },
@@ -381,7 +395,7 @@ export const getMine = query({
       .order("asc")
       .take(50)
     return {
-      notificationId,
+      notificationId: notification._id,
       subject: notification.subject,
       status: notification.status,
       createdAt: notification.createdAt,
@@ -397,6 +411,69 @@ export const getMine = query({
   },
 })
 
+async function retryNotification(
+  ctx: MutationCtx,
+  notification: Doc<"notifications">
+) {
+  if (!retryableStatuses.has(notification.status)) {
+    throw new ConvexError("This notification is not eligible for retry.")
+  }
+  if (notification.retryBlockedReason) {
+    throw new ConvexError("This notification is not eligible for retry.")
+  }
+  if (!notification.template) {
+    throw new ConvexError("This notification can no longer be retried.")
+  }
+  if (
+    notification.payloadExpiresAt &&
+    notification.payloadExpiresAt <= Date.now()
+  ) {
+    throw new ConvexError("This notification has expired.")
+  }
+  if (await hasSuppression(ctx, notification.recipient)) {
+    throw new ConvexError("Delivery is blocked for this recipient.")
+  }
+  const attemptNumber = notification.latestAttemptNumber + 1
+  const now = Date.now()
+  await ctx.db.insert("notificationDeliveries", {
+    notificationId: notification._id,
+    attemptNumber,
+    recipient: notification.recipient,
+    status: "scheduled",
+    createdAt: now,
+    updatedAt: now,
+  })
+  await ctx.db.patch(notification._id, {
+    status: "scheduled",
+    latestAttemptNumber: attemptNumber,
+    activeAttemptNumber: attemptNumber,
+    updatedAt: now,
+  })
+  await ctx.scheduler.runAfter(0, internal.emailActions.renderAndEnqueue, {
+    notificationId: notification._id,
+    attemptNumber,
+  })
+  return attemptNumber
+}
+
+export const retryInternal = internalMutation({
+  args: { notificationId: v.id("notifications") },
+  returns: v.number(),
+  handler: async (ctx, { notificationId }) => {
+    const notification = await ctx.db.get(notificationId)
+    if (!notification) throw new ConvexError("Notification not found.")
+    const attemptNumber = await retryNotification(ctx, notification)
+    await ctx.runMutation(
+      internal.eventInvitations.projectNotificationDelivery,
+      {
+        notificationId,
+        status: "scheduled",
+      }
+    )
+    return attemptNumber
+  },
+})
+
 export const retryMine = mutation({
   args: { notificationId: v.id("notifications") },
   returns: v.number(),
@@ -406,44 +483,17 @@ export const retryMine = mutation({
     if (!user || !notification || notification.ownerId !== user._id) {
       throw new ConvexError("Notification not found.")
     }
-    if (!retryableStatuses.has(notification.status)) {
-      throw new ConvexError("This notification is not eligible for retry.")
+    if (notification.invitationRef) {
+      throw new ConvexError("Retry guest invitations from the guest list.")
     }
-    if (notification.retryBlockedReason) {
-      throw new ConvexError("This notification is not eligible for retry.")
-    }
-    if (!notification.template) {
-      throw new ConvexError("This notification can no longer be retried.")
-    }
-    if (
-      notification.payloadExpiresAt &&
-      notification.payloadExpiresAt <= Date.now()
-    ) {
-      throw new ConvexError("This notification has expired.")
-    }
-    if (await hasSuppression(ctx, notification.recipient)) {
-      throw new ConvexError("Delivery is blocked for this recipient.")
-    }
-    const attemptNumber = notification.latestAttemptNumber + 1
-    const now = Date.now()
-    await ctx.db.insert("notificationDeliveries", {
-      notificationId,
-      attemptNumber,
-      recipient: notification.recipient,
-      status: "scheduled",
-      createdAt: now,
-      updatedAt: now,
-    })
-    await ctx.db.patch(notificationId, {
-      status: "scheduled",
-      latestAttemptNumber: attemptNumber,
-      activeAttemptNumber: attemptNumber,
-      updatedAt: now,
-    })
-    await ctx.scheduler.runAfter(0, internal.emailActions.renderAndEnqueue, {
-      notificationId,
-      attemptNumber,
-    })
+    const attemptNumber = await retryNotification(ctx, notification)
+    await ctx.runMutation(
+      internal.eventInvitations.projectNotificationDelivery,
+      {
+        notificationId,
+        status: "scheduled",
+      }
+    )
     return attemptNumber
   },
 })
@@ -605,6 +655,16 @@ async function applyProviderUpdate(
         : undefined,
       updatedAt: now,
     })
+    const currentNotification = await ctx.db.get(notification._id)
+    if (currentNotification) {
+      await ctx.runMutation(
+        internal.eventInvitations.projectNotificationDelivery,
+        {
+          notificationId: notification._id,
+          status: currentNotification.status,
+        }
+      )
+    }
   }
 }
 

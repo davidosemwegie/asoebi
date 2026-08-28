@@ -22,7 +22,7 @@ export function PageHeader() {
     pageTitles[pathname] ??
     (pathname.endsWith("/setup")
       ? "Event setup"
-      : pathname.endsWith("/guests")
+      : pathname.includes("/guests")
         ? "Guests"
         : pathname.endsWith("/orders")
           ? "Orders"

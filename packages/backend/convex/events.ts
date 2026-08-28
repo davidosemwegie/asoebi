@@ -2,6 +2,9 @@ import { ConvexError, v } from "convex/values"
 
 import {
   MAX_CATALOG_ITEMS,
+  MAX_EVENT_INVITATIONS,
+  MAX_EVENT_INVITATION_IMPORT_RECEIPTS,
+  MAX_EVENT_INVITATION_SEND_RECEIPTS,
   MAX_FULFILLMENT_OPTIONS,
   generateUniqueShareToken,
   getOwnerId,
@@ -9,6 +12,7 @@ import {
   requireOwnedEvent,
   validateDeadline,
 } from "./eventModel"
+import { clearInvitationAggregateNamespaces } from "./eventInvitationAggregates"
 import {
   eventStatus,
   fulfillmentRequiredFields,
@@ -18,6 +22,7 @@ import type { Doc, Id } from "./_generated/dataModel"
 import { mutation, query } from "./_generated/server"
 
 const MAX_EVENTS_PER_OWNER = 200
+const MAX_COVER_UPLOAD_CLAIMS = 5
 const ACTIVE_EVENT_STATUSES = ["draft", "published", "closed"] as const
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 
@@ -361,39 +366,65 @@ export const remove = mutation({
       throw new ConvexError("Only draft events can be deleted.")
     }
 
-    const [items, paymentInstructions, fulfillmentOptions, coverUploadClaims] =
-      await Promise.all([
-        ctx.db
-          .query("items")
-          .withIndex("by_eventId_and_sortOrder", (q) =>
-            q.eq("eventId", eventId)
-          )
-          .take(MAX_CATALOG_ITEMS + 1),
-        ctx.db
-          .query("eventPaymentInstructions")
-          .withIndex("by_eventId", (q) => q.eq("eventId", eventId))
-          .unique(),
-        ctx.db
-          .query("fulfillmentOptions")
-          .withIndex("by_eventId_and_sortOrder", (q) =>
-            q.eq("eventId", eventId)
-          )
-          .take(MAX_FULFILLMENT_OPTIONS + 1),
-        ctx.db
-          .query("coverUploadClaims")
-          .withIndex("by_eventId", (q) => q.eq("eventId", eventId))
-          .take(6),
-      ])
+    const [
+      items,
+      paymentInstructions,
+      fulfillmentOptions,
+      coverUploadClaims,
+      invitations,
+      importReceipts,
+      sendReceipts,
+    ] = await Promise.all([
+      ctx.db
+        .query("items")
+        .withIndex("by_eventId_and_sortOrder", (q) => q.eq("eventId", eventId))
+        .take(MAX_CATALOG_ITEMS + 1),
+      ctx.db
+        .query("eventPaymentInstructions")
+        .withIndex("by_eventId", (q) => q.eq("eventId", eventId))
+        .unique(),
+      ctx.db
+        .query("fulfillmentOptions")
+        .withIndex("by_eventId_and_sortOrder", (q) => q.eq("eventId", eventId))
+        .take(MAX_FULFILLMENT_OPTIONS + 1),
+      ctx.db
+        .query("coverUploadClaims")
+        .withIndex("by_eventId", (q) => q.eq("eventId", eventId))
+        .take(MAX_COVER_UPLOAD_CLAIMS + 1),
+      ctx.db
+        .query("eventInvitations")
+        .withIndex("by_eventId_and_createdAt", (q) => q.eq("eventId", eventId))
+        .take(MAX_EVENT_INVITATIONS + 1),
+      ctx.db
+        .query("eventInvitationImportChunks")
+        .withIndex("by_eventId_and_importId_and_chunkIndex", (q) =>
+          q.eq("eventId", eventId)
+        )
+        .take(MAX_EVENT_INVITATION_IMPORT_RECEIPTS + 1),
+      ctx.db
+        .query("eventInvitationSendRequests")
+        .withIndex("by_eventId_and_requestId", (q) => q.eq("eventId", eventId))
+        .take(MAX_EVENT_INVITATION_SEND_RECEIPTS + 1),
+    ])
     if (
       items.length > MAX_CATALOG_ITEMS ||
-      fulfillmentOptions.length > MAX_FULFILLMENT_OPTIONS
+      fulfillmentOptions.length > MAX_FULFILLMENT_OPTIONS ||
+      coverUploadClaims.length > MAX_COVER_UPLOAD_CLAIMS ||
+      invitations.length > MAX_EVENT_INVITATIONS ||
+      importReceipts.length > MAX_EVENT_INVITATION_IMPORT_RECEIPTS ||
+      sendReceipts.length > MAX_EVENT_INVITATION_SEND_RECEIPTS
     ) {
       throw new ConvexError("The event could not be deleted safely.")
     }
 
+    if (invitations.length > 0)
+      await clearInvitationAggregateNamespaces(ctx, eventId)
     for (const item of items) await ctx.db.delete(item._id)
     for (const option of fulfillmentOptions) await ctx.db.delete(option._id)
     for (const claim of coverUploadClaims) await ctx.db.delete(claim._id)
+    for (const receipt of importReceipts) await ctx.db.delete(receipt._id)
+    for (const receipt of sendReceipts) await ctx.db.delete(receipt._id)
+    for (const invitation of invitations) await ctx.db.delete(invitation._id)
     if (paymentInstructions) await ctx.db.delete(paymentInstructions._id)
     if (event.coverStorageId) await ctx.storage.delete(event.coverStorageId)
     await ctx.db.delete(eventId)

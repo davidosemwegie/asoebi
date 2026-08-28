@@ -6,6 +6,9 @@ import type { MutationCtx, QueryCtx } from "./_generated/server"
 
 export const MAX_CATALOG_ITEMS = 100
 export const MAX_FULFILLMENT_OPTIONS = 20
+export const MAX_EVENT_INVITATIONS = 1_000
+export const MAX_EVENT_INVITATION_IMPORT_RECEIPTS = 100
+export const MAX_EVENT_INVITATION_SEND_RECEIPTS = 100
 export const MAX_PAYMENT_INSTRUCTIONS_LENGTH = 4_000
 export const MAX_COVER_BYTES = 10 * 1024 * 1024
 export const SUPPORTED_COVER_TYPES = new Set([
