@@ -19,7 +19,7 @@ beforeAll(() => {
   vi.stubEnv("SITE_URL", "http://localhost:3000")
   vi.stubEnv("RESEND_API_KEY", "re_test_only")
   vi.stubEnv("RESEND_WEBHOOK_SECRET", "whsec_test_only")
-  vi.stubEnv("EMAIL_FROM", "Asoebi <onboarding@resend.dev>")
+  vi.stubEnv("EMAIL_FROM", "Aso Circle <onboarding@resend.dev>")
   vi.stubEnv("EMAIL_DELIVERY_MODE", "test")
 })
 

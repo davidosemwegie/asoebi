@@ -184,8 +184,8 @@ export function EventDetails() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {event.name}?</AlertDialogTitle>
             <AlertDialogDescription className="text-base">
-              This permanently deletes the draft event and all of its catalog
-              items. This action cannot be undone.
+              This permanently deletes the draft event and all of its items.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
 

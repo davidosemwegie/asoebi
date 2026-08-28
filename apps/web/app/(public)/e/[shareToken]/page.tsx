@@ -5,7 +5,7 @@ import { PublicEventLanding } from "@/components/public-event-landing"
 import { api } from "@workspace/backend/convex/_generated/api"
 
 export const metadata: Metadata = {
-  title: "Private event | Asoebi",
+  title: "Private event",
   description: "View event details and available aso ebi items.",
 }
 

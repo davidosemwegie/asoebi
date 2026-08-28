@@ -37,22 +37,25 @@ export function EventsOverview({ createOpen }: { createOpen: boolean }) {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-4">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-10 py-8 md:py-12">
       <header>
-        <h1 className="font-heading text-3xl font-semibold text-balance">
+        <h1 className="font-display text-4xl leading-none font-medium tracking-tight text-balance sm:text-5xl">
           Home
         </h1>
-        <p className="mt-1 text-base text-pretty text-muted-foreground">
+        <p className="mt-3 max-w-xl text-base text-pretty text-muted-foreground">
           Manage events you organise and orders you place as a guest.
         </p>
       </header>
 
-      <section aria-labelledby="organised-events-heading" className="space-y-4">
-        <div className="flex items-start justify-between gap-4">
+      <section
+        aria-labelledby="organised-events-heading"
+        className="space-y-5 border-t border-border/80 pt-7"
+      >
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <h2
               id="organised-events-heading"
-              className="font-heading text-2xl font-semibold text-balance"
+              className="font-display text-3xl font-medium tracking-tight text-balance"
             >
               Events I organise
             </h2>
@@ -63,7 +66,7 @@ export function EventsOverview({ createOpen }: { createOpen: boolean }) {
           <Button
             ref={primaryCreateButtonRef}
             type="button"
-            className="min-h-12 text-base"
+            className="min-h-12 w-full text-base sm:w-auto"
             onClick={(event) => openCreateEditor(event.currentTarget)}
           >
             <PlusIcon aria-hidden="true" /> New event
@@ -72,11 +75,14 @@ export function EventsOverview({ createOpen }: { createOpen: boolean }) {
         <EventList onCreate={openCreateEditor} />
       </section>
 
-      <section aria-labelledby="my-orders-heading" className="space-y-4">
+      <section
+        aria-labelledby="my-orders-heading"
+        className="space-y-5 border-t border-border/80 pt-7"
+      >
         <div>
           <h2
             id="my-orders-heading"
-            className="font-heading text-2xl font-semibold text-balance"
+            className="font-display text-3xl font-medium tracking-tight text-balance"
           >
             My orders
           </h2>

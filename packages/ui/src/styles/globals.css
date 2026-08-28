@@ -9,7 +9,16 @@
 
 @theme inline {
   --font-heading:
-    "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+    "DM Sans", "DM Sans Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    "Playfair Display", "Playfair Display Fallback", Georgia, "Times New Roman",
+    serif;
+  --color-brand-aubergine: var(--brand-aubergine);
+  --color-brand-blackberry: var(--brand-blackberry);
+  --color-brand-ivory: var(--brand-ivory);
+  --color-brand-periwinkle: var(--brand-periwinkle);
+  --color-brand-powder: var(--brand-powder);
+  --color-brand-plum: var(--brand-aubergine);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,77 +57,85 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-sans:
+    "DM Sans", "DM Sans Fallback", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --brand-aubergine: #321727;
+  --brand-blackberry: #24131e;
+  --brand-powder: #afcbe4;
+  --brand-periwinkle: #91b3d1;
+  --brand-ivory: #f5f0e8;
+  color-scheme: light;
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #1d1d1f;
+  --primary-foreground: #ffffff;
+  --secondary: #efeff1;
+  --secondary-foreground: #1d1d1f;
+  --muted: #ececef;
+  --muted-foreground: #6e6e73;
+  --accent: #eaeaed;
+  --accent-foreground: #1d1d1f;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --border: #d2d2d7;
+  --input: #d2d2d7;
+  --ring: var(--brand-periwinkle);
+  --chart-1: var(--brand-aubergine);
+  --chart-2: var(--brand-periwinkle);
+  --chart-3: #7d6573;
+  --chart-4: var(--brand-powder);
+  --chart-5: #b29da6;
+  --radius: 0.75rem;
+  --sidebar: #fbfbfc;
+  --sidebar-foreground: #1d1d1f;
+  --sidebar-primary: #1d1d1f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececef;
+  --sidebar-accent-foreground: #1d1d1f;
+  --sidebar-border: #e2e2e7;
+  --sidebar-ring: var(--brand-periwinkle);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: light;
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #1d1d1f;
+  --primary-foreground: #ffffff;
+  --secondary: #efeff1;
+  --secondary-foreground: #1d1d1f;
+  --muted: #ececef;
+  --muted-foreground: #6e6e73;
+  --accent: #eaeaed;
+  --accent-foreground: #1d1d1f;
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: #d2d2d7;
+  --input: #d2d2d7;
+  --ring: var(--brand-periwinkle);
+  --chart-1: var(--brand-aubergine);
+  --chart-2: var(--brand-periwinkle);
+  --chart-3: #7d6573;
+  --chart-4: var(--brand-powder);
+  --chart-5: #b29da6;
+  --sidebar: #fbfbfc;
+  --sidebar-foreground: #1d1d1f;
+  --sidebar-primary: #1d1d1f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececef;
+  --sidebar-accent-foreground: #1d1d1f;
+  --sidebar-border: #e2e2e7;
+  --sidebar-ring: var(--brand-periwinkle);
 }
 
 @layer base {
@@ -126,6 +143,27 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply min-h-svh bg-background text-foreground antialiased;
   }
+  ::selection {
+    background: color-mix(in srgb, var(--brand-powder) 72%, transparent);
+    color: var(--brand-blackberry);
+  }
+}
+
+[data-slot="sidebar-inset"] {
+  min-width: 0;
+}
+
+[data-slot="sidebar-menu-button"][data-active="true"] {
+  color: var(--sidebar-accent-foreground);
+}
+
+[data-slot="sidebar-menu-button"][data-active="true"] svg {
+  color: var(--brand-periwinkle);
+}
+
+#main-content > main > [data-slot="empty"] {
+  background-color: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
 }

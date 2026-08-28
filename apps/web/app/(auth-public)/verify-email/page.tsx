@@ -1,5 +1,13 @@
+import type { Metadata } from "next"
+
 import { VerifyEmailForm } from "@/components/verify-email-form"
 import { getSafeAuthContinuation } from "@/lib/auth-continuation"
+
+export const metadata: Metadata = {
+  title: "Verify your email",
+  description: "Verify the email address for your Aso Circle account.",
+  alternates: { canonical: "/verify-email" },
+}
 
 function hasSearchParam(value: string | string[] | undefined) {
   return typeof value === "string" || Array.isArray(value)

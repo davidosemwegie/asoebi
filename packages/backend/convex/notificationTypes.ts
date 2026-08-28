@@ -99,9 +99,9 @@ function safeSubject(value: string) {
 export function subjectForTemplate(template: NotificationTemplate): string {
   switch (template.kind) {
     case "verify_email":
-      return safeSubject("Verify your Asoebi email")
+      return safeSubject("Verify your Aso Circle email")
     case "reset_password":
-      return safeSubject("Reset your Asoebi password")
+      return safeSubject("Reset your Aso Circle password")
     case "event_invitation":
       return safeSubject(`You are invited to ${template.eventName}`)
     case "guest_order_submitted":

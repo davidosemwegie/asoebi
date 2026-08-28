@@ -26,7 +26,7 @@ beforeAll(() => {
   vi.stubEnv("SITE_URL", "http://localhost:3000")
   vi.stubEnv("RESEND_API_KEY", "re_test_only")
   vi.stubEnv("RESEND_WEBHOOK_SECRET", "whsec_test_only")
-  vi.stubEnv("EMAIL_FROM", "Asoebi <onboarding@resend.dev>")
+  vi.stubEnv("EMAIL_FROM", "Aso Circle <onboarding@resend.dev>")
   vi.stubEnv("EMAIL_DELIVERY_MODE", "test")
 })
 
@@ -134,9 +134,9 @@ function commonEventData(providerId: string, createdAt: string) {
   return {
     created_at: createdAt,
     email_id: providerId,
-    from: "Asoebi <onboarding@resend.dev>",
+    from: "Aso Circle <onboarding@resend.dev>",
     to: ["delivered+asoebi-test@resend.dev"],
-    subject: "Verify your Asoebi email",
+    subject: "Verify your Aso Circle email",
   }
 }
 
@@ -273,7 +273,7 @@ describe("notification outbox", () => {
     })
     expect(componentEmail).toMatchObject({
       to: ["delivered+asoebi-test@resend.dev"],
-      subject: "Verify your Asoebi email",
+      subject: "Verify your Aso Circle email",
       status: "waiting",
     })
     expect(componentEmail?.text).toContain("https://asoebi.example/verify")
@@ -922,7 +922,7 @@ describe("Resend cleanup scheduling", () => {
         await ctx.db.insert("notifications", {
           dedupeKey: `expired:${index}`,
           recipient: `expired-${index}@example.com`,
-          subject: "Verify your Asoebi email",
+          subject: "Verify your Aso Circle email",
           templateKind: "verify_email",
           template: verifyTemplate,
           status: "failed",

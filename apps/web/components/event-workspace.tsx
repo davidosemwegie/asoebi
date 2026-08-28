@@ -64,7 +64,7 @@ export function EventWorkspace({
 
   if (event === undefined) {
     return (
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-4">
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-8 md:py-12">
         <div className="space-y-3">
           <Skeleton className="h-8 w-64" />
           <Skeleton className="h-5 w-40" />
@@ -77,7 +77,7 @@ export function EventWorkspace({
 
   if (event === null) {
     return (
-      <main className="mx-auto flex w-full max-w-6xl flex-col py-4">
+      <main className="mx-auto flex w-full max-w-6xl flex-col py-8 md:py-12">
         <Empty className="min-h-80 border">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -121,10 +121,10 @@ export function EventWorkspace({
 
   return (
     <EventWorkspaceContext.Provider value={event}>
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-4">
-        <header className="space-y-2">
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-8 md:py-12">
+        <header className="space-y-3 border-b border-border/80 pb-6">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-heading text-2xl font-semibold text-balance">
+            <h1 className="font-display text-3xl leading-tight font-medium tracking-tight text-balance sm:text-4xl">
               {event.name}
             </h1>
             <Badge variant="secondary" className="capitalize">
