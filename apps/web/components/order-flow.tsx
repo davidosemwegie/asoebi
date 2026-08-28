@@ -17,6 +17,7 @@ import { getAuthHref } from "@/lib/auth-continuation"
 import { formatMoney } from "@/lib/money"
 import {
   earliestIncompleteStep,
+  missingRequiredFulfillmentFields,
   ORDER_STEPS,
   type OrderStep,
 } from "@/lib/order-step-guards"
@@ -78,8 +79,8 @@ function Stepper({
 }) {
   const currentIndex = ORDER_STEPS.indexOf(current)
   return (
-    <nav aria-label="Order steps" className="overflow-x-auto pb-1">
-      <ol className="flex min-w-max gap-2 text-base">
+    <nav aria-label="Order steps" className="pb-1">
+      <ol className="flex flex-wrap gap-2 text-base">
         {ORDER_STEPS.map((step, index) => {
           const active = index === currentIndex
           const href = `/e/${shareToken}/order/${step}`
@@ -121,6 +122,8 @@ export function OrderFlow({
   const startCheckout = useMutation(api.eventAttendees.startCheckout)
   const saveDraft = useMutation(api.checkout.saveDraft)
   const submit = useMutation(api.checkout.submit)
+  const updatePending = useMutation(api.checkout.updatePending)
+  const resubmitRejected = useMutation(api.checkout.resubmitRejected)
   const generateProofUploadUrl = useMutation(
     api.checkout.generateProofUploadUrl
   )
@@ -133,11 +136,18 @@ export function OrderFlow({
   const [guestName, setGuestName] = useState("")
   const [guestPhone, setGuestPhone] = useState("")
   const [details, setDetails] = useState<Record<string, string>>({})
+  const [detailErrors, setDetailErrors] = useState<Record<string, string>>({})
   const [proofId, setProofId] = useState<string | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
+  const [editHydrated, setEditHydrated] = useState(false)
+  const [editReviewed, setEditReviewed] = useState(false)
   const submitRequestId = useRef<string | null>(null)
   const checkout = useQuery(api.checkout.get, joined ? { shareToken } : "skip")
+
+  const pendingEditKey = checkout?.order
+    ? `asoebi:order-edit:${checkout.order._id}`
+    : null
 
   useEffect(() => {
     if (!isAuthenticated || joined) return
@@ -150,13 +160,71 @@ export function OrderFlow({
     if (!checkout?.order) return
     const next: Record<string, number> = {}
     for (const line of checkout.lines) next[line.itemId] = line.quantity
-    setQuantities(next)
-    setOptionId(checkout.order.fulfillmentOptionId ?? "")
-    setGuestName(checkout.order.guestName ?? "")
-    setGuestPhone(checkout.order.guestPhone ?? "")
-    setDetails(checkout.order.fulfillmentDetails ?? {})
-    setProofId(checkout.order.currentProofId ?? null)
-  }, [checkout?.order?._id])
+    const saved =
+      checkout.order.lifecycle !== "draft" && pendingEditKey
+        ? window.localStorage.getItem(pendingEditKey)
+        : null
+    const edit = saved
+      ? (JSON.parse(saved) as {
+          quantities?: Record<string, number>
+          optionId?: string
+          guestName?: string
+          guestPhone?: string
+          details?: Record<string, string>
+          proofId?: string
+          fileName?: string
+          reviewed?: boolean
+        })
+      : null
+    setQuantities(edit?.quantities ?? next)
+    setOptionId(edit?.optionId ?? checkout.order.fulfillmentOptionId ?? "")
+    setGuestName(edit?.guestName ?? checkout.order.guestName ?? "")
+    setGuestPhone(edit?.guestPhone ?? checkout.order.guestPhone ?? "")
+    setDetails(edit?.details ?? checkout.order.fulfillmentDetails ?? {})
+    setFileName(edit?.fileName ?? null)
+    setEditReviewed(edit?.reviewed ?? checkout.order.lifecycle === "draft")
+    setProofId(
+      edit?.proofId ??
+        (checkout.order.paymentStatus === "rejected"
+          ? null
+          : (checkout.order.currentProofId ?? null))
+    )
+    setEditHydrated(true)
+  }, [checkout?.order?._id, pendingEditKey])
+
+  useEffect(() => {
+    if (
+      !editHydrated ||
+      !pendingEditKey ||
+      checkout?.order?.lifecycle === "draft"
+    )
+      return
+    window.localStorage.setItem(
+      pendingEditKey,
+      JSON.stringify({
+        quantities,
+        optionId,
+        guestName,
+        guestPhone,
+        details,
+        proofId,
+        fileName,
+        reviewed: editReviewed,
+      })
+    )
+  }, [
+    checkout?.order?.lifecycle,
+    details,
+    editHydrated,
+    editReviewed,
+    fileName,
+    guestName,
+    guestPhone,
+    optionId,
+    pendingEditKey,
+    proofId,
+    quantities,
+  ])
 
   const lines = useMemo(
     () =>
@@ -168,32 +236,137 @@ export function OrderFlow({
   const selectedOption = checkout?.fulfillmentOptions.find(
     (option) => option._id === optionId
   )
+  const proposal = useMemo(() => {
+    const existing = new Map(checkout?.lines.map((line) => [line.itemId, line]))
+    const nextLines = lines.map(({ item, quantity }) => {
+      const old = existing.get(item._id)
+      const unitPriceMinor = old?.unitPriceMinor ?? item.priceMinor
+      return {
+        itemName: old?.itemName ?? item.name,
+        unitLabel: old?.unitLabel ?? item.unitLabel,
+        quantity,
+        unitPriceMinor,
+        lineTotalMinor: unitPriceMinor * quantity,
+      }
+    })
+    const subtotal = nextLines.reduce(
+      (sum, line) => sum + line.lineTotalMinor,
+      0
+    )
+    const fee =
+      checkout?.order?.fulfillmentOptionId === optionId
+        ? (checkout?.order?.fulfillmentFeeMinor ?? 0)
+        : (selectedOption?.feeMinor ?? 0)
+    return {
+      lines: nextLines,
+      fulfillmentFeeMinor: fee,
+      totalMinor: subtotal + fee,
+    }
+  }, [
+    checkout?.lines,
+    checkout?.order?.fulfillmentFeeMinor,
+    checkout?.order?.fulfillmentOptionId,
+    lines,
+    optionId,
+    selectedOption?.feeMinor,
+  ])
+  const setDetail = (field: string, value: string) => {
+    setEditReviewed(false)
+    setDetails((old) => ({ ...old, [field]: value }))
+    setDetailErrors((old) => {
+      const rest = { ...old }
+      delete rest[field]
+      return rest
+    })
+  }
   const completeThrough = checkout
     ? Math.max(
         0,
         ORDER_STEPS.indexOf(
           earliestIncompleteStep({
-            lines: checkout.lines,
-            fulfillmentOptionId: checkout.order?.fulfillmentOptionId,
-            guestName: checkout.order?.guestName,
-            reviewedAt: checkout.order?.reviewedAt,
+            lines,
+            fulfillmentOptionId: optionId,
+            guestName,
+            reviewedAt:
+              checkout.order?.lifecycle === "draft"
+                ? checkout.order?.reviewedAt
+                : editReviewed
+                  ? 1
+                  : undefined,
+            fulfillmentRequiredFields: selectedOption?.requiredFields,
+            fulfillmentDetails: details,
           })
         )
       )
     : 0
 
   useEffect(() => {
-    if (!checkout?.order || step === "items") return
+    if (!checkout?.order || !editHydrated || step === "items") return
     const earliest = earliestIncompleteStep({
-      lines: checkout.lines,
-      fulfillmentOptionId: checkout.order.fulfillmentOptionId,
-      guestName: checkout.order.guestName,
-      reviewedAt: checkout.order.reviewedAt,
+      lines,
+      fulfillmentOptionId: optionId,
+      guestName,
+      reviewedAt:
+        checkout.order.lifecycle === "draft"
+          ? checkout.order.reviewedAt
+          : editReviewed
+            ? 1
+            : undefined,
+      fulfillmentRequiredFields: selectedOption?.requiredFields,
+      fulfillmentDetails: details,
     })
     if (ORDER_STEPS.indexOf(step) > ORDER_STEPS.indexOf(earliest))
       router.replace(`/e/${shareToken}/order/${earliest}`)
-  }, [checkout?.order, checkout?.lines, router, shareToken, step])
+  }, [
+    checkout?.order,
+    details,
+    editHydrated,
+    editReviewed,
+    guestName,
+    lines,
+    optionId,
+    router,
+    selectedOption?.requiredFields,
+    shareToken,
+    step,
+  ])
 
+  useEffect(() => {
+    if (
+      checkout?.order?.paymentStatus !== "pending_review" ||
+      proposal.totalMinor === checkout.order.totalMinor ||
+      proofId !== checkout.order.currentProofId
+    )
+      return
+    setProofId(null)
+    if (pendingEditKey) {
+      const saved = window.localStorage.getItem(pendingEditKey)
+      const edit = saved ? (JSON.parse(saved) as Record<string, unknown>) : {}
+      delete edit.proofId
+      window.localStorage.setItem(pendingEditKey, JSON.stringify(edit))
+    }
+  }, [checkout?.order, pendingEditKey, proofId, proposal.totalMinor])
+
+  if (error && isAuthenticated && !joined)
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-xl items-center px-4 py-8 text-lg">
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle className="text-2xl">Ordering is unavailable</CardTitle>
+            <CardDescription className="text-lg">{error}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              nativeButton={false}
+              render={<Link href="/" />}
+              className="min-h-12 text-lg"
+            >
+              Go to My orders
+            </Button>
+          </CardContent>
+        </Card>
+      </main>
+    )
   if (authLoading || (isAuthenticated && !joined) || checkout === undefined)
     return (
       <main
@@ -238,26 +411,48 @@ export function OrderFlow({
 
   const persist = async (nextStep: OrderStep, reviewed = false) => {
     setError(null)
+    const missing =
+      nextStep === "review"
+        ? missingRequiredFulfillmentFields(
+            selectedOption?.requiredFields,
+            details
+          )
+        : []
+    if (missing.length) {
+      const nextErrors = Object.fromEntries(
+        missing.map((field) => [
+          field,
+          "This field is required for this option.",
+        ])
+      )
+      setDetailErrors(nextErrors)
+      setError("Complete the required details before continuing.")
+      requestAnimationFrame(() =>
+        document.getElementById(`detail-${missing[0]}`)?.focus()
+      )
+      return
+    }
     setPending(true)
-    if (nextStep === "review" && selectedOption) {
-      const required = selectedOption.requiredFields
-      const missing =
-        required.kind === "pickup"
-          ? required.pickupContact && !details.pickupContact?.trim()
-          : (required.recipientName && !details.recipientName?.trim()) ||
-            (required.phoneNumber && !details.phoneNumber?.trim()) ||
-            (required.address && !details.address?.trim()) ||
-            (required.availability && !details.availability?.trim()) ||
-            (required.notes && !details.notes?.trim())
-      if (missing) {
-        setError(
-          "Complete each required pickup or delivery field before continuing."
-        )
-        setPending(false)
+    try {
+      if (checkout.order?.lifecycle !== "draft") {
+        setEditReviewed(reviewed)
+        if (pendingEditKey)
+          window.localStorage.setItem(
+            pendingEditKey,
+            JSON.stringify({
+              quantities,
+              optionId,
+              guestName,
+              guestPhone,
+              details,
+              proofId,
+              fileName,
+              reviewed,
+            })
+          )
+        router.push(`/e/${shareToken}/order/${nextStep}`)
         return
       }
-    }
-    try {
       await saveDraft({
         shareToken,
         lines: lines.map(({ item, quantity }) => ({
@@ -312,6 +507,20 @@ export function OrderFlow({
       })
       if (!finalized.ok) throw new Error(finalized.message)
       setProofId(finalized.proofId)
+      if (pendingEditKey) {
+        const saved = window.localStorage.getItem(pendingEditKey)
+        const draft = saved
+          ? (JSON.parse(saved) as Record<string, unknown>)
+          : {}
+        window.localStorage.setItem(
+          pendingEditKey,
+          JSON.stringify({
+            ...draft,
+            proofId: finalized.proofId,
+            fileName: file.name,
+          })
+        )
+      }
     } catch (cause) {
       setFileError(
         cause instanceof Error
@@ -332,7 +541,7 @@ export function OrderFlow({
     setPending(true)
     try {
       submitRequestId.current ??= requestId()
-      const orderId = await submit({
+      const payload = {
         shareToken,
         requestId: submitRequestId.current,
         lines: lines.map(({ item, quantity }) => ({
@@ -340,11 +549,17 @@ export function OrderFlow({
           quantity,
         })),
         fulfillment: { optionId: optionId as never, ...details },
-        proofId: proofId as never,
         guestName,
         guestPhone: guestPhone || undefined,
-      })
+      }
+      const orderId =
+        checkout.order?.paymentStatus === "pending_review"
+          ? await updatePending({ ...payload, proofId: proofId as never })
+          : checkout.order?.paymentStatus === "rejected"
+            ? await resubmitRejected({ ...payload, proofId: proofId as never })
+            : await submit({ ...payload, proofId: proofId as never })
       submitRequestId.current = null
+      if (pendingEditKey) window.localStorage.removeItem(pendingEditKey)
       router.replace(`/e/${shareToken}/order/confirmation?orderId=${orderId}`)
     } catch (cause) {
       setError(
@@ -402,12 +617,13 @@ export function OrderFlow({
                       variant="outline"
                       className="size-11"
                       aria-label={`Reduce ${item.name} quantity`}
-                      onClick={() =>
+                      onClick={() => {
+                        setEditReviewed(false)
                         setQuantities((old) => ({
                           ...old,
                           [item._id]: Math.max(0, (old[item._id] ?? 0) - 1),
                         }))
-                      }
+                      }}
                     >
                       <MinusIcon aria-hidden="true" />
                     </Button>
@@ -415,19 +631,19 @@ export function OrderFlow({
                       {quantities[item._id] ?? 0}
                     </span>
                     <Button
-                      type="button"
                       variant="outline"
                       className="size-11"
                       aria-label={`Increase ${item.name} quantity`}
                       disabled={
                         (quantities[item._id] ?? 0) >= item.availableQuantity
                       }
-                      onClick={() =>
+                      onClick={() => {
+                        setEditReviewed(false)
                         setQuantities((old) => ({
                           ...old,
                           [item._id]: (old[item._id] ?? 0) + 1,
                         }))
-                      }
+                      }}
                     >
                       <PlusIcon aria-hidden="true" />
                     </Button>
@@ -447,7 +663,13 @@ export function OrderFlow({
         {step === "fulfillment" ? (
           <Card>
             <CardContent className="space-y-5 pt-6">
-              <RadioGroup value={optionId} onValueChange={setOptionId}>
+              <RadioGroup
+                value={optionId}
+                onValueChange={(value) => {
+                  setEditReviewed(false)
+                  setOptionId(value)
+                }}
+              >
                 {checkout.fulfillmentOptions.map((option) => (
                   <Label
                     key={option._id}
@@ -486,7 +708,10 @@ export function OrderFlow({
                     className="min-h-12 text-lg"
                     required
                     value={guestName}
-                    onChange={(event) => setGuestName(event.target.value)}
+                    onChange={(event) => {
+                      setEditReviewed(false)
+                      setGuestName(event.target.value)
+                    }}
                   />
                 </Field>
                 <Field>
@@ -495,11 +720,14 @@ export function OrderFlow({
                     id="guest-phone"
                     className="min-h-12 text-lg"
                     value={guestPhone}
-                    onChange={(event) => setGuestPhone(event.target.value)}
+                    onChange={(event) => {
+                      setEditReviewed(false)
+                      setGuestPhone(event.target.value)
+                    }}
                   />
                 </Field>
                 {selectedOption?.type === "pickup" ? (
-                  <Field>
+                  <Field data-invalid={Boolean(detailErrors.pickupContact)}>
                     <FieldLabel htmlFor="pickup-contact">
                       Pickup contact
                       {selectedOption.requiredFields.kind === "pickup" &&
@@ -508,24 +736,30 @@ export function OrderFlow({
                         : ""}
                     </FieldLabel>
                     <Input
-                      id="pickup-contact"
+                      id="detail-pickupContact"
                       className="min-h-12 text-lg"
                       required={
                         selectedOption.requiredFields.kind === "pickup" &&
                         selectedOption.requiredFields.pickupContact
                       }
                       value={details.pickupContact ?? ""}
+                      aria-invalid={Boolean(detailErrors.pickupContact)}
+                      aria-describedby={
+                        detailErrors.pickupContact
+                          ? "detail-pickupContact-error"
+                          : undefined
+                      }
                       onChange={(event) =>
-                        setDetails((old) => ({
-                          ...old,
-                          pickupContact: event.target.value,
-                        }))
+                        setDetail("pickupContact", event.target.value)
                       }
                     />
+                    <FieldError id="detail-pickupContact-error">
+                      {detailErrors.pickupContact}
+                    </FieldError>
                   </Field>
                 ) : (
                   <>
-                    <Field>
+                    <Field data-invalid={Boolean(detailErrors.recipientName)}>
                       <FieldLabel htmlFor="recipient-name">
                         Recipient name
                         {selectedOption?.requiredFields.kind === "delivery" &&
@@ -534,22 +768,28 @@ export function OrderFlow({
                           : ""}
                       </FieldLabel>
                       <Input
-                        id="recipient-name"
+                        id="detail-recipientName"
                         className="min-h-12 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
                           selectedOption.requiredFields.recipientName
                         }
                         value={details.recipientName ?? ""}
+                        aria-invalid={Boolean(detailErrors.recipientName)}
+                        aria-describedby={
+                          detailErrors.recipientName
+                            ? "detail-recipientName-error"
+                            : undefined
+                        }
                         onChange={(event) =>
-                          setDetails((old) => ({
-                            ...old,
-                            recipientName: event.target.value,
-                          }))
+                          setDetail("recipientName", event.target.value)
                         }
                       />
+                      <FieldError id="detail-recipientName-error">
+                        {detailErrors.recipientName}
+                      </FieldError>
                     </Field>
-                    <Field>
+                    <Field data-invalid={Boolean(detailErrors.phoneNumber)}>
                       <FieldLabel htmlFor="delivery-phone">
                         Delivery phone number
                         {selectedOption?.requiredFields.kind === "delivery" &&
@@ -558,22 +798,28 @@ export function OrderFlow({
                           : ""}
                       </FieldLabel>
                       <Input
-                        id="delivery-phone"
+                        id="detail-phoneNumber"
                         className="min-h-12 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
                           selectedOption.requiredFields.phoneNumber
                         }
                         value={details.phoneNumber ?? ""}
+                        aria-invalid={Boolean(detailErrors.phoneNumber)}
+                        aria-describedby={
+                          detailErrors.phoneNumber
+                            ? "detail-phoneNumber-error"
+                            : undefined
+                        }
                         onChange={(event) =>
-                          setDetails((old) => ({
-                            ...old,
-                            phoneNumber: event.target.value,
-                          }))
+                          setDetail("phoneNumber", event.target.value)
                         }
                       />
+                      <FieldError id="detail-phoneNumber-error">
+                        {detailErrors.phoneNumber}
+                      </FieldError>
                     </Field>
-                    <Field>
+                    <Field data-invalid={Boolean(detailErrors.address)}>
                       <FieldLabel htmlFor="address">
                         Delivery address
                         {selectedOption?.requiredFields.kind === "delivery" &&
@@ -582,22 +828,28 @@ export function OrderFlow({
                           : ""}
                       </FieldLabel>
                       <Textarea
-                        id="address"
+                        id="detail-address"
                         className="min-h-24 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
                           selectedOption.requiredFields.address
                         }
                         value={details.address ?? ""}
+                        aria-invalid={Boolean(detailErrors.address)}
+                        aria-describedby={
+                          detailErrors.address
+                            ? "detail-address-error"
+                            : undefined
+                        }
                         onChange={(event) =>
-                          setDetails((old) => ({
-                            ...old,
-                            address: event.target.value,
-                          }))
+                          setDetail("address", event.target.value)
                         }
                       />
+                      <FieldError id="detail-address-error">
+                        {detailErrors.address}
+                      </FieldError>
                     </Field>
-                    <Field>
+                    <Field data-invalid={Boolean(detailErrors.availability)}>
                       <FieldLabel htmlFor="availability">
                         Delivery availability
                         {selectedOption?.requiredFields.kind === "delivery" &&
@@ -606,22 +858,28 @@ export function OrderFlow({
                           : ""}
                       </FieldLabel>
                       <Textarea
-                        id="availability"
+                        id="detail-availability"
                         className="min-h-24 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
                           selectedOption.requiredFields.availability
                         }
                         value={details.availability ?? ""}
+                        aria-invalid={Boolean(detailErrors.availability)}
+                        aria-describedby={
+                          detailErrors.availability
+                            ? "detail-availability-error"
+                            : undefined
+                        }
                         onChange={(event) =>
-                          setDetails((old) => ({
-                            ...old,
-                            availability: event.target.value,
-                          }))
+                          setDetail("availability", event.target.value)
                         }
                       />
+                      <FieldError id="detail-availability-error">
+                        {detailErrors.availability}
+                      </FieldError>
                     </Field>
-                    <Field>
+                    <Field data-invalid={Boolean(detailErrors.notes)}>
                       <FieldLabel htmlFor="notes">
                         Delivery notes
                         {selectedOption?.requiredFields.kind === "delivery" &&
@@ -630,20 +888,24 @@ export function OrderFlow({
                           : ""}
                       </FieldLabel>
                       <Textarea
-                        id="notes"
+                        id="detail-notes"
                         className="min-h-24 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
                           selectedOption.requiredFields.notes
                         }
                         value={details.notes ?? ""}
+                        aria-invalid={Boolean(detailErrors.notes)}
+                        aria-describedby={
+                          detailErrors.notes ? "detail-notes-error" : undefined
+                        }
                         onChange={(event) =>
-                          setDetails((old) => ({
-                            ...old,
-                            notes: event.target.value,
-                          }))
+                          setDetail("notes", event.target.value)
                         }
                       />
+                      <FieldError id="detail-notes-error">
+                        {detailErrors.notes}
+                      </FieldError>
                     </Field>
                   </>
                 )}
@@ -665,13 +927,19 @@ export function OrderFlow({
                 Check your order
               </h2>
               <ul className="space-y-2">
-                {checkout.lines.map((line) => (
-                  <li key={line._id} className="flex justify-between gap-3">
+                {proposal.lines.map((line) => (
+                  <li
+                    key={line.itemName}
+                    className="flex justify-between gap-3"
+                  >
                     <span>
                       {line.itemName} × {line.quantity}
                     </span>
                     <span>
-                      {formatMoney(line.lineTotalMinor, line.currency)}
+                      {formatMoney(
+                        line.lineTotalMinor,
+                        checkout.event.currency
+                      )}
                     </span>
                   </li>
                 ))}
@@ -679,16 +947,13 @@ export function OrderFlow({
               <p>
                 Fulfillment:{" "}
                 {formatMoney(
-                  checkout.order?.fulfillmentFeeMinor ?? 0,
+                  proposal.fulfillmentFeeMinor,
                   checkout.event.currency
                 )}
               </p>
               <p className="font-semibold">
                 Total:{" "}
-                {formatMoney(
-                  checkout.order?.totalMinor ?? 0,
-                  checkout.event.currency
-                )}
+                {formatMoney(proposal.totalMinor, checkout.event.currency)}
               </p>
               <Button
                 className="min-h-12 w-full"

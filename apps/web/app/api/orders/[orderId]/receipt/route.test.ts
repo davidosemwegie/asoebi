@@ -15,13 +15,11 @@ describe("private receipt proxy", () => {
   it("requires a token and relays only safe receipt bytes with no-store headers", async () => {
     vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
     vi.mocked(getToken).mockResolvedValue("guest-token")
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(Uint8Array.from([1]), {
-          headers: { "Content-Type": "application/pdf" },
-        })
-      )
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(Uint8Array.from([1]), {
+        headers: { "Content-Type": "application/pdf" },
+      })
+    )
     vi.stubGlobal("fetch", fetchMock)
     const response = await GET(
       new Request("http://localhost/api/orders/abc/receipt"),
@@ -43,5 +41,25 @@ describe("private receipt proxy", () => {
       { params: Promise.resolve({ orderId: "abc" }) }
     )
     expect(response.status).toBe(404)
+  })
+
+  it("rejects malformed IDs and unsafe or failed upstream responses", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
+    vi.mocked(getToken).mockResolvedValue("guest-token")
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("unsafe", { headers: { "Content-Type": "text/html" } })
+      )
+    vi.stubGlobal("fetch", fetchMock)
+    const malformed = await GET(new Request("http://localhost"), {
+      params: Promise.resolve({ orderId: "../../bad" }),
+    })
+    const unsafe = await GET(new Request("http://localhost"), {
+      params: Promise.resolve({ orderId: "safe" }),
+    })
+    expect(malformed.status).toBe(404)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(unsafe.status).toBe(404)
   })
 })

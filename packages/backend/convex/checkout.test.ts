@@ -153,4 +153,68 @@ describe("guest checkout", () => {
     expect(checkout!.attendee.emailVerified).toBe(false)
     expect(checkout!.order!.lifecycle).toBe("draft")
   })
+
+  it("submits once, reserves atomically, and replays a canonically equivalent request", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const guest = await user(t, "guest@example.com")
+    await guest.client.mutation(api.eventAttendees.startCheckout, {
+      shareToken: event.shareToken,
+    })
+    const draftId = await guest.client.mutation(api.checkout.saveDraft, {
+      shareToken: event.shareToken,
+      lines: [{ itemId: event.itemId, quantity: 1 }],
+      fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+      guestName: "Ada",
+    })
+    const proofId = await t.run(async (ctx) => {
+      const draft = await ctx.db.get(draftId)
+      if (!draft) throw new Error("missing draft")
+      const storageId = await ctx.storage.store(
+        new Blob(["%PDF-1.4\n%%EOF"], { type: "application/pdf" })
+      )
+      return await ctx.db.insert("paymentProofs", {
+        eventId: draft.eventId,
+        attendeeId: draft.attendeeId,
+        storageId,
+        contentType: "application/pdf",
+        size: 8,
+        sha256: "a".repeat(43) + "=",
+        submittedByUserId: guest.userId,
+        status: "active",
+        createdAt: Date.now(),
+      })
+    })
+    const first = await guest.client.mutation(api.checkout.submit, {
+      shareToken: event.shareToken,
+      requestId: "replay-key-123",
+      lines: [{ itemId: event.itemId, quantity: 1 }],
+      fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+      proofId,
+      guestName: "Ada",
+    })
+    const replay = await guest.client.mutation(api.checkout.submit, {
+      guestName: "Ada",
+      proofId,
+      fulfillment: { pickupContact: "Ada", optionId: event.optionId },
+      lines: [{ quantity: 1, itemId: event.itemId }],
+      requestId: "replay-key-123",
+      shareToken: event.shareToken,
+    })
+    expect(replay).toBe(first)
+    await expect(
+      guest.client.mutation(api.checkout.submit, {
+        shareToken: event.shareToken,
+        requestId: "replay-key-123",
+        lines: [{ itemId: event.itemId, quantity: 1 }],
+        fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+        proofId,
+        guestName: "Different",
+      })
+    ).rejects.toThrow("already used")
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(1)
+      expect((await ctx.db.get(first))!.lifecycle).toBe("submitted")
+    })
+  })
 })

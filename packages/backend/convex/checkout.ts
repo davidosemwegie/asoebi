@@ -319,8 +319,12 @@ export const get = query({
             .take(MAX_ORDER_LINES)
         : [],
     ])
+    // Only a live reservation should be added back for the attendee editing it.
+    // Draft and rejected orders intentionally reserve no inventory.
     const retainedQuantities = new Map(
-      lines.map((line) => [line.itemId, line.quantity])
+      order?.reservationState === "reserved"
+        ? lines.map((line) => [line.itemId, line.quantity])
+        : []
     )
     return {
       event: {
@@ -866,6 +870,12 @@ export const generateProofUploadUrl = mutation({
       throw new ConvexError(
         "Save your order before uploading a payment receipt."
       )
+    if (
+      order.lifecycle !== "draft" &&
+      order.paymentStatus !== "pending_review" &&
+      order.paymentStatus !== "rejected"
+    )
+      throw new ConvexError("This order cannot accept another payment receipt.")
     if (!PROOF_TYPES.has(args.contentType))
       throw new ConvexError("Use a JPEG, PNG, or PDF payment receipt.")
     if (
@@ -885,6 +895,11 @@ export const generateProofUploadUrl = mutation({
       .take(5)
     for (const claim of claims)
       if (claim.expiresAt <= now) await ctx.db.delete(claim._id)
+    const activeClaims = claims.filter((claim) => claim.expiresAt > now)
+    if (activeClaims.length >= 3)
+      throw new ConvexError(
+        "Finish or wait for your existing receipt uploads before starting another."
+      )
     const claimId = await ctx.db.insert("proofUploadClaims", {
       eventId: event._id,
       attendeeId: attendee._id,
@@ -914,6 +929,9 @@ export const inspectProofUpload = internalQuery({
       order.eventId !== claim.eventId ||
       order.userId !== user._id ||
       order.lifecycle === "cancelled" ||
+      (order.lifecycle !== "draft" &&
+        order.paymentStatus !== "pending_review" &&
+        order.paymentStatus !== "rejected") ||
       claim.uploaderUserId !== user._id ||
       claim.expiresAt < Date.now() ||
       !metadata ||
@@ -959,6 +977,9 @@ export const finalizeProofUpload = internalMutation({
       order.eventId !== claim.eventId ||
       order.userId !== user._id ||
       order.lifecycle === "cancelled" ||
+      (order.lifecycle !== "draft" &&
+        order.paymentStatus !== "pending_review" &&
+        order.paymentStatus !== "rejected") ||
       claim.uploaderUserId !== user._id ||
       claim.expiresAt < Date.now() ||
       !metadata ||
@@ -1029,7 +1050,7 @@ export const afterSubmit = internalMutation({
     if (!event) return null
     const actionUrl = `${env.SITE_URL}/orders/${order._id}`
     await createNotification(ctx, {
-      dedupeKey: `order:guest-submitted:${order._id}`,
+      dedupeKey: `order:guest-submitted:${order._id}:${order.submittedAt ?? order.updatedAt}`,
       recipient: order.guestEmail,
       eventRef: `${event._id}`,
       orderRef: `${order._id}`,
@@ -1046,7 +1067,7 @@ export const afterSubmit = internalMutation({
     })
     if (owner) {
       await createNotification(ctx, {
-        dedupeKey: `order:organizer-new:${order._id}`,
+        dedupeKey: `order:organizer-new:${order._id}:${order.submittedAt ?? order.updatedAt}`,
         recipient: owner.email,
         ownerId: event.ownerId,
         eventRef: `${event._id}`,

@@ -311,7 +311,7 @@ export async function appendOrderHistory(
 }
 
 export async function digestPayload(value: unknown) {
-  const json = JSON.stringify(value)
+  const json = stableJson(value)
   const bytes = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(json)
@@ -319,6 +319,17 @@ export async function digestPayload(value: unknown) {
   return Array.from(new Uint8Array(bytes), (byte) =>
     byte.toString(16).padStart(2, "0")
   ).join("")
+}
+
+/** Canonical request hashing must not depend on JavaScript object key order. */
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`
+  const record = value as Record<string, unknown>
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`
 }
 
 export function validateRequestId(requestId: string) {

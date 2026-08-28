@@ -138,11 +138,20 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           Cancel order
         </Button>
       ) : null}
+      {event?.shareToken && order.paymentStatus === "pending_review" ? (
+        <Button
+          nativeButton={false}
+          render={<Link href={`/e/${event.shareToken}/order/items`} />}
+          className="min-h-12 text-lg"
+        >
+          Edit order
+        </Button>
+      ) : null}
       {event?.shareToken && order.paymentStatus === "rejected" ? (
         <Button
           nativeButton={false}
           render={<Link href={`/e/${event.shareToken}/order/items`} />}
-          className="min-h-12"
+          className="min-h-12 text-lg"
         >
           Update and resubmit
         </Button>
