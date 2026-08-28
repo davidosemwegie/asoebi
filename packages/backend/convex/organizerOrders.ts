@@ -175,30 +175,12 @@ const orderHistoryResult = v.object({
     v.literal("organizer"),
     v.literal("system")
   ),
-  previousLifecycle: v.union(
-    v.literal("draft"),
-    v.literal("submitted"),
-    v.literal("cancelled")
-  ),
-  lifecycle: v.union(
-    v.literal("draft"),
-    v.literal("submitted"),
-    v.literal("cancelled")
-  ),
-  previousPaymentStatus: v.union(
-    v.literal("not_submitted"),
-    v.literal("pending_review"),
-    v.literal("confirmed"),
-    v.literal("rejected")
-  ),
-  paymentStatus: v.union(
-    v.literal("not_submitted"),
-    v.literal("pending_review"),
-    v.literal("confirmed"),
-    v.literal("rejected")
-  ),
-  previousProgress: progressFilter,
-  progress: progressFilter,
+  previousLifecycle: orderLifecycle,
+  lifecycle: orderLifecycle,
+  previousPaymentStatus: paymentStatus,
+  paymentStatus,
+  previousProgress: orderProgress,
+  progress: orderProgress,
   note: v.optional(v.string()),
   createdAt: v.number(),
 })
