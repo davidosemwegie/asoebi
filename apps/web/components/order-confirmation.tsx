@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { useConvexAuth, useQuery } from "convex/react"
 
-import { canShowOrderConfirmation } from "@/lib/order-step-guards"
+import { orderConfirmationDestination } from "@/lib/order-step-guards"
 import { api } from "@workspace/backend/convex/_generated/api"
 import { Button } from "@workspace/ui/components/button"
 import {
@@ -29,11 +29,10 @@ export function OrderConfirmation({
     api.orders.getMineForConfirmation,
     isAuthenticated ? { orderId } : "skip"
   )
-  const belongsToEvent = Boolean(
-    data?.eventShareToken === shareToken && data.lifecycle === "submitted"
-  )
-  const waitingForPaymentCheck =
-    belongsToEvent && canShowOrderConfirmation(data)
+  const destination =
+    data === undefined
+      ? "loading"
+      : orderConfirmationDestination(data, shareToken)
   useEffect(() => {
     if (isLoading) return
     if (!isAuthenticated) {
@@ -41,22 +40,21 @@ export function OrderConfirmation({
       return
     }
     if (data === undefined) return
-    if (!belongsToEvent) {
+    if (destination === "checkout") {
       router.replace(`/e/${shareToken}/order/items`)
       return
     }
-    if (!waitingForPaymentCheck) router.replace(`/orders/${orderId}`)
+    if (destination === "detail") router.replace(`/orders/${orderId}`)
   }, [
-    belongsToEvent,
     data,
+    destination,
     isAuthenticated,
     isLoading,
     orderId,
     router,
     shareToken,
-    waitingForPaymentCheck,
   ])
-  if (!waitingForPaymentCheck)
+  if (destination !== "confirmation")
     return (
       <main
         className="mx-auto min-h-dvh max-w-xl px-4 py-8 text-lg"

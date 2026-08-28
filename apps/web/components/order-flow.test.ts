@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  canShowOrderConfirmation,
   canGuestCancelOrder,
   earliestIncompleteStep,
   missingRequiredFulfillmentFields,
+  orderConfirmationDestination,
   unreservedQuantityAvailabilityIssues,
 } from "../lib/order-step-guards"
 
@@ -108,31 +108,58 @@ describe("guest order step guards", () => {
     ).toBe(false)
   })
 
-  it("shows the submission confirmation only while payment awaits review", () => {
+  it("routes confirmation links according to the current order state", () => {
     expect(
-      canShowOrderConfirmation({
-        lifecycle: "submitted",
-        paymentStatus: "pending_review",
-      })
-    ).toBe(true)
+      orderConfirmationDestination(
+        {
+          lifecycle: "submitted",
+          paymentStatus: "pending_review",
+          eventShareToken: "event-token",
+        },
+        "event-token"
+      )
+    ).toBe("confirmation")
     expect(
-      canShowOrderConfirmation({
-        lifecycle: "submitted",
-        paymentStatus: "confirmed",
-      })
-    ).toBe(false)
+      orderConfirmationDestination(
+        {
+          lifecycle: "submitted",
+          paymentStatus: "confirmed",
+          eventShareToken: "event-token",
+        },
+        "event-token"
+      )
+    ).toBe("detail")
     expect(
-      canShowOrderConfirmation({
-        lifecycle: "submitted",
-        paymentStatus: "rejected",
-      })
-    ).toBe(false)
+      orderConfirmationDestination(
+        {
+          lifecycle: "submitted",
+          paymentStatus: "rejected",
+          eventShareToken: "event-token",
+        },
+        "event-token"
+      )
+    ).toBe("detail")
     expect(
-      canShowOrderConfirmation({
-        lifecycle: "draft",
-        paymentStatus: "not_submitted",
-      })
-    ).toBe(false)
+      orderConfirmationDestination(
+        {
+          lifecycle: "cancelled",
+          paymentStatus: "pending_review",
+          eventShareToken: "event-token",
+        },
+        "event-token"
+      )
+    ).toBe("detail")
+    expect(
+      orderConfirmationDestination(
+        {
+          lifecycle: "submitted",
+          paymentStatus: "pending_review",
+          eventShareToken: "another-event",
+        },
+        "event-token"
+      )
+    ).toBe("checkout")
+    expect(orderConfirmationDestination(null, "event-token")).toBe("checkout")
   })
 
   it("holds direct review and payment links at details until configured fields are complete", () => {

@@ -104,12 +104,22 @@ export function canGuestCancelOrder({
   )
 }
 
-export function canShowOrderConfirmation(
-  order: { lifecycle: string; paymentStatus: string } | null | undefined
+export function orderConfirmationDestination(
+  order: {
+    lifecycle: string
+    paymentStatus: string
+    eventShareToken: string | null
+  } | null,
+  shareToken: string
 ) {
-  return (
-    order?.lifecycle === "submitted" && order.paymentStatus === "pending_review"
-  )
+  if (!order || order.eventShareToken !== shareToken) return "checkout" as const
+  if (
+    order.lifecycle === "submitted" &&
+    order.paymentStatus === "pending_review"
+  ) {
+    return "confirmation" as const
+  }
+  return "detail" as const
 }
 
 export function earliestIncompleteStep(order: {
