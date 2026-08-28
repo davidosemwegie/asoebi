@@ -9,6 +9,7 @@ import {
   getOwnerId,
   requireEditableEvent,
 } from "./eventModel"
+import { isCanonicalSha256Base64, sha256ValuesEqual } from "./fileDigests"
 import { fulfillmentRequiredFields, fulfillmentType } from "./schema"
 import { internal } from "./_generated/api"
 import type { Id } from "./_generated/dataModel"
@@ -205,6 +206,23 @@ export const removeFulfillmentOption = mutation({
     const option = await ctx.db.get(optionId)
     if (!option) return null
     await requireEditableEvent(ctx, option.eventId)
+    const [draft, submitted] = await Promise.all(
+      (["draft", "submitted"] as const).map((lifecycle) =>
+        ctx.db
+          .query("orders")
+          .withIndex("by_eventId_and_fulfillmentOptionId_and_lifecycle", (q) =>
+            q
+              .eq("eventId", option.eventId)
+              .eq("fulfillmentOptionId", optionId)
+              .eq("lifecycle", lifecycle)
+          )
+          .first()
+      )
+    )
+    if (draft || submitted)
+      throw new ConvexError(
+        "This pickup or delivery option is used by an active order and cannot be deleted."
+      )
     await ctx.db.delete(optionId)
     return null
   },
@@ -229,7 +247,7 @@ export const generateCoverUploadUrl = mutation({
     if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_COVER_BYTES) {
       throw new ConvexError("Choose a cover image no larger than 10 MB.")
     }
-    if (!/^[A-Za-z0-9+/]{43}=$/.test(sha256)) {
+    if (!isCanonicalSha256Base64(sha256)) {
       throw new ConvexError("The cover image fingerprint is not valid.")
     }
     const ownerId = await getOwnerId(ctx)
@@ -383,7 +401,7 @@ async function inspectCoverCandidate(
     !metadata ||
     metadata._creationTime <= claim._creationTime ||
     metadata._creationTime > claim.expiresAt ||
-    metadata.sha256 !== claim.sha256 ||
+    !sha256ValuesEqual(metadata.sha256, claim.sha256) ||
     metadata.size !== claim.size
   ) {
     return {

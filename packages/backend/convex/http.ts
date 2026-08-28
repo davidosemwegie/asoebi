@@ -1,13 +1,30 @@
 import { Webhook } from "svix"
 import { httpRouter } from "convex/server"
+import type { FunctionReference } from "convex/server"
 
 import { authComponent, createAuth } from "./auth"
 import { resend } from "./emailProvider"
 import { internal } from "./_generated/api"
+import type { Id } from "./_generated/dataModel"
 import { env, httpAction, type ActionCtx } from "./_generated/server"
 
 const http = httpRouter()
 const PUBLIC_EVENT_COVER_PREFIX = "/public-event-cover/v1/"
+const PRIVATE_ORDER_RECEIPT_PREFIX = "/private-order-receipt/v1/"
+const internalOrders = internal as unknown as {
+  orders: {
+    getReceiptForOwner: FunctionReference<
+      "query",
+      "internal",
+      { orderId: Id<"orders"> },
+      {
+        storageId: Id<"_storage">
+        contentType: string
+        reference: string
+      } | null
+    >
+  }
+}
 
 authComponent.registerRoutes(http, createAuth)
 
@@ -46,6 +63,47 @@ http.route({
   pathPrefix: PUBLIC_EVENT_COVER_PREFIX,
   method: "GET",
   handler: httpAction(servePublicEventCover),
+})
+
+http.route({
+  pathPrefix: PRIVATE_ORDER_RECEIPT_PREFIX,
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const suffix = new URL(request.url).pathname.slice(
+      PRIVATE_ORDER_RECEIPT_PREFIX.length
+    )
+    if (!suffix || suffix.includes("/"))
+      return new Response("Not found", { status: 404 })
+    let receipt: {
+      storageId: Id<"_storage">
+      contentType: string
+      reference: string
+    } | null
+    try {
+      receipt = await ctx.runQuery(internalOrders.orders.getReceiptForOwner, {
+        orderId: suffix as Id<"orders">,
+      })
+    } catch {
+      return new Response("Not found", { status: 404 })
+    }
+    if (!receipt) return new Response("Not found", { status: 404 })
+    const bytes = await ctx.storage.get(receipt.storageId)
+    if (!bytes) return new Response("Not found", { status: 404 })
+    const extension =
+      receipt.contentType === "application/pdf"
+        ? "pdf"
+        : receipt.contentType === "image/png"
+          ? "png"
+          : "jpg"
+    return new Response(bytes, {
+      headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Type": receipt.contentType,
+        "Content-Disposition": `attachment; filename="payment-receipt-${receipt.reference.replace(/[^A-Za-z0-9_-]/g, "")}.${extension}"`,
+        "X-Content-Type-Options": "nosniff",
+      },
+    })
+  }),
 })
 
 http.route({
