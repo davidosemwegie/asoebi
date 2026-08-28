@@ -100,6 +100,24 @@ describe("organizer CSV stream", () => {
     ).toBe(404)
   })
 
+  it.each([121, 160, 161])(
+    "rejects a %i-character search instead of changing the export filter",
+    async (length) => {
+      vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
+      vi.mocked(getToken).mockResolvedValue("owner-token")
+      const fetchMock = vi.fn()
+      vi.stubGlobal("fetch", fetchMock)
+      const response = await GET(
+        new Request(
+          `http://localhost/api/events/event/orders.csv?search=${"x".repeat(length)}`
+        ),
+        { params: Promise.resolve({ eventId: "event" }) }
+      )
+      expect(response.status).toBe(404)
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
+  )
+
   it("continues past a filter-empty source page", async () => {
     vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
     vi.mocked(getToken).mockResolvedValue("owner-token")

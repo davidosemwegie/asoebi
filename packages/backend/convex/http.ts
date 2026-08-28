@@ -7,11 +7,11 @@ import { resend } from "./emailProvider"
 import { internal } from "./_generated/api"
 import type { Id } from "./_generated/dataModel"
 import { env, httpAction, type ActionCtx } from "./_generated/server"
+import { normalizeOrderSearch } from "./organizerOrderFilters"
 
 const http = httpRouter()
 const PUBLIC_EVENT_COVER_PREFIX = "/public-event-cover/v1/"
 const PRIVATE_ORDER_RECEIPT_PREFIX = "/private-order-receipt/v1/"
-const PRIVATE_ORDER_EXPORT_PREFIX = "/private-order-export/v1/"
 const PRIVATE_ORDER_EXPORT_STREAM_PREFIX = "/private-order-export/v2/"
 const paymentStatuses = [
   "not_submitted",
@@ -47,15 +47,18 @@ function enumParam<const T extends readonly string[]>(
   value: string | null,
   allowed: T
 ): T[number] | undefined {
-  return value && allowed.includes(value) ? (value as T[number]) : undefined
+  if (value === null || value === "") return undefined
+  if (!allowed.includes(value)) throw new Error("Invalid order filter.")
+  return value as T[number]
 }
 
 function idParam<TableName extends "items" | "fulfillmentOptions">(
   value: string | null
 ): Id<TableName> | undefined {
-  return value && /^[A-Za-z0-9]{1,128}$/.test(value)
-    ? (value as Id<TableName>)
-    : undefined
+  if (value === null || value === "") return undefined
+  if (!/^[A-Za-z0-9]{1,128}$/.test(value))
+    throw new Error("Invalid order filter.")
+  return value as Id<TableName>
 }
 
 authComponent.registerRoutes(http, createAuth)
@@ -111,7 +114,7 @@ http.route({
       const page = await ctx.runQuery(internal.organizerOrders.getExportPage, {
         eventId: eventId as Id<"events">,
         cursor: url.searchParams.get("cursor"),
-        search: url.searchParams.get("search") || undefined,
+        search: normalizeOrderSearch(url.searchParams.get("search") ?? undefined),
         paymentStatus: enumParam(
           url.searchParams.get("paymentStatus"),
           paymentStatuses
@@ -127,41 +130,6 @@ http.route({
         itemId: idParam<"items">(url.searchParams.get("itemId")),
       })
       return Response.json(page, {
-        headers: { "Cache-Control": "private, no-store" },
-      })
-    } catch {
-      return new Response("Not found", { status: 404 })
-    }
-  }),
-})
-
-http.route({
-  pathPrefix: PRIVATE_ORDER_EXPORT_PREFIX,
-  method: "GET",
-  handler: httpAction(async (ctx, request) => {
-    const url = new URL(request.url)
-    const eventId = url.pathname.slice(PRIVATE_ORDER_EXPORT_PREFIX.length)
-    if (!eventId || eventId.includes("/"))
-      return new Response("Not found", { status: 404 })
-    try {
-      const rows = await ctx.runQuery(internal.organizerOrders.getExportRows, {
-        eventId: eventId as Id<"events">,
-        search: url.searchParams.get("search") || undefined,
-        paymentStatus: enumParam(
-          url.searchParams.get("paymentStatus"),
-          paymentStatuses
-        ),
-        progress: enumParam(url.searchParams.get("progress"), progressStatuses),
-        fulfillmentOptionId: idParam<"fulfillmentOptions">(
-          url.searchParams.get("fulfillmentOptionId")
-        ),
-        fulfillmentType: enumParam(
-          url.searchParams.get("fulfillmentType"),
-          fulfillmentTypes
-        ),
-        itemId: idParam<"items">(url.searchParams.get("itemId")),
-      })
-      return Response.json(rows, {
         headers: { "Cache-Control": "private, no-store" },
       })
     } catch {

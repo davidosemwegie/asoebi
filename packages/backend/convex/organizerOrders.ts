@@ -9,6 +9,7 @@ import {
 import { projectOrderCompletion } from "./eventInvitations"
 import { createNotification } from "./notifications"
 import { appendOrderHistory, releaseReservation } from "./orderModel"
+import { normalizeOrderSearch } from "./organizerOrderFilters"
 import {
   itemDemand,
   orderPaymentCounts,
@@ -103,6 +104,18 @@ const orderHistoryResult = v.object({
 
 function submittedPaymentBounds(paymentStatus: string) {
   const key: [string, string] = ["submitted", paymentStatus]
+  return {
+    lower: { key, inclusive: true },
+    upper: { key, inclusive: true },
+  }
+}
+
+function cancelledProgressBounds(paymentStatus: string) {
+  const key: [string, string, string] = [
+    "cancelled",
+    paymentStatus,
+    "cancelled",
+  ]
   return {
     lower: { key, inclusive: true },
     upper: { key, inclusive: true },
@@ -238,9 +251,7 @@ async function matchesOrderFilters(
 
 async function listOrders(ctx: QueryCtx, args: OrderListArgs) {
   await requireOwnedEvent(ctx, args.eventId)
-  const search = args.search?.trim().toLowerCase()
-  if (search && search.length > 120)
-    throw new ConvexError("Search is too long.")
+  const search = normalizeOrderSearch(args.search)
   const requested = Math.min(Math.max(args.paginationOpts.numItems, 1), 50)
   const cursor = decodeOrderListCursor(args.paginationOpts.cursor)
   const page: Doc<"orders">[] = []
@@ -388,12 +399,16 @@ export const getSummary = query({
     const progressCounts = await Promise.all(
       progressStatuses.map(async (progress) => {
         const counts = await Promise.all(
-          paymentStatuses.map((paymentStatus) =>
-            orderProgressCounts.count(ctx, {
+          paymentStatuses.map((paymentStatus) => {
+            const bounds =
+              progress === "cancelled"
+                ? cancelledProgressBounds(paymentStatus)
+                : submittedPaymentProgressBounds(paymentStatus, progress)
+            return orderProgressCounts.count(ctx, {
               namespace: eventId,
-              bounds: submittedPaymentProgressBounds(paymentStatus, progress),
+              bounds,
             })
-          )
+          })
         )
         return [progress, counts.reduce((sum, value) => sum + value, 0)] as const
       })
@@ -443,7 +458,7 @@ export const getDetail = query({
   args: { eventId: v.id("events"), orderId: v.id("orders") },
   returns: v.any(),
   handler: async (ctx, args) => {
-    await requireOwnedEvent(ctx, args.eventId)
+    const event = await requireOwnedEvent(ctx, args.eventId)
     const order = await ctx.db.get(args.orderId)
     if (!order || order.eventId !== args.eventId) return null
     const [lines, history, proof] = await Promise.all([
@@ -462,6 +477,7 @@ export const getDetail = query({
     ])
     return {
       order: summaryOrder(order),
+      eventTimeZone: event.timeZone ?? "UTC",
       lines,
       history,
       receiptAvailable: Boolean(proof?.status === "active"),
@@ -502,75 +518,6 @@ export const listHistory = query({
   },
 })
 
-/** Private export projection. The HTTP action carries the caller's identity, so
- * this repeats ownership verification rather than trusting a route parameter. */
-/** Legacy single-page projection retained only for internal compatibility. */
-export const getExportRows = internalQuery({
-  args: {
-    eventId: v.id("events"),
-    search: v.optional(v.string()),
-    paymentStatus: statusFilter,
-    progress: progressFilter,
-    fulfillmentOptionId: v.optional(v.id("fulfillmentOptions")),
-    fulfillmentType: v.optional(
-      v.union(v.literal("pickup"), v.literal("delivery"))
-    ),
-    itemId: v.optional(v.id("items")),
-  },
-  returns: v.any(),
-  handler: async (ctx, args) => {
-    const event = await requireOwnedEvent(ctx, args.eventId)
-    let orders = await ctx.db
-      .query("orders")
-      .withIndex("by_eventId_and_lifecycle_and_updatedAt", (q) =>
-        q.eq("eventId", event._id).eq("lifecycle", "submitted")
-      )
-      .take(1000)
-    const search = args.search?.trim().toLowerCase()
-    orders = orders.filter(
-      (order) =>
-        (!search || order.searchText.includes(search)) &&
-        (!args.paymentStatus || order.paymentStatus === args.paymentStatus) &&
-        (!args.progress || order.progress === args.progress) &&
-        (!args.fulfillmentOptionId ||
-          order.fulfillmentOptionId === args.fulfillmentOptionId) &&
-        (!args.fulfillmentType ||
-          order.fulfillmentType === args.fulfillmentType)
-    )
-    const rows: any[] = []
-    for (const order of orders) {
-      const lines = await ctx.db
-        .query("orderLines")
-        .withIndex("by_orderId", (q) => q.eq("orderId", order._id))
-        .take(100)
-      for (const line of lines) {
-        if (args.itemId && line.itemId !== args.itemId) continue
-        rows.push({
-          reference: order.reference,
-          guestName: order.guestName ?? "",
-          guestEmail: order.guestEmail ?? "",
-          guestPhone: order.guestPhone ?? "",
-          item: line.itemName,
-          quantity: line.quantity,
-          unitPriceMinor: line.unitPriceMinor,
-          lineTotalMinor: line.lineTotalMinor,
-          orderTotalMinor: order.totalMinor,
-          currency: order.currency ?? "",
-          paymentStatus: order.paymentStatus,
-          progress: order.progress,
-          fulfillment: order.fulfillmentOptionName ?? "",
-          fulfillmentType: order.fulfillmentType ?? "",
-          submittedAt: order.submittedAt ?? order.createdAt,
-          reviewedAt: order.reviewedAt ?? "",
-          fulfilledAt: order.progress === "fulfilled" ? order.updatedAt : "",
-          timeZone: event.timeZone ?? "UTC",
-        })
-      }
-    }
-    return rows
-  },
-})
-
 export const getExportPage = internalQuery({
   args: {
     eventId: v.id("events"),
@@ -594,7 +541,7 @@ export const getExportPage = internalQuery({
       )
       .order("desc")
       .paginate({ numItems: 25, cursor: args.cursor })
-    const search = args.search?.trim().toLowerCase()
+    const search = normalizeOrderSearch(args.search)
     const rows: any[] = []
     for (const order of page.page) {
       if (!(await matchesOrderFilters(ctx, order, args, search))) continue

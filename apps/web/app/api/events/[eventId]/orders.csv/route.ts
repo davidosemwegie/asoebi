@@ -1,4 +1,5 @@
 import { orderCsvHeader, orderCsvRow } from "../../../../../lib/order-csv"
+import { normalizeOrderSearch } from "@workspace/backend/convex/organizerOrderFilters"
 
 const EVENT_ID_PATTERN = /^[A-Za-z0-9]{1,128}$/
 const FILTERS = [
@@ -20,13 +21,18 @@ export async function GET(
   const token = await getToken()
   if (!token || !convexSiteUrl || !EVENT_ID_PATTERN.test(eventId))
     return new Response("Not found", { status: 404 })
-  const requestUrl = new URL(request.url)
-  const filters = new URLSearchParams()
-  for (const filter of FILTERS) {
-    const value = requestUrl.searchParams.get(filter)
-    if (value) filters.set(filter, value.slice(0, 160))
-  }
   try {
+    const requestUrl = new URL(request.url)
+    const filters = new URLSearchParams()
+    for (const filter of FILTERS) {
+      const value = requestUrl.searchParams.get(filter)
+      if (value) {
+        if (filter === "search")
+          filters.set(filter, normalizeOrderSearch(value) ?? "")
+        else if (value.length > 128) throw new Error("Invalid order filter.")
+        else filters.set(filter, value)
+      }
+    }
     const endpoint = `${convexSiteUrl}/private-order-export/v2/${encodeURIComponent(eventId)}`
     const upstream = await fetch(`${endpoint}?${filters}`, {
       headers: { Authorization: `Bearer ${token}` },

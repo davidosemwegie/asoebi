@@ -12,6 +12,7 @@ import type { Id } from "@workspace/backend/convex/_generated/dataModel"
 import { Button } from "@workspace/ui/components/button"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
+import { Label } from "@workspace/ui/components/label"
 import {
   Select,
   SelectContent,
@@ -91,143 +92,187 @@ export function OrganizerOrders() {
   if (itemId) query.set("itemId", itemId)
   if (fulfillmentOptionId) query.set("fulfillmentOptionId", fulfillmentOptionId)
   if (fulfillmentType) query.set("fulfillmentType", fulfillmentType)
-  const controls = (
+  const controls = (prefix: string) => (
     <>
-      <label className="sr-only" htmlFor="order-search">
-        Search orders
-      </label>
-      <Input
-        id="order-search"
-        value={search}
-        onChange={(event) => {
-          setSearch(event.target.value)
-          setCursor(null)
-          setPrevious([])
-        }}
-        placeholder="Search reference or guest"
-        className="min-h-12 text-base"
-      />
-      <Select
-        value={paymentStatus}
-        onValueChange={(value) => {
-          setPaymentStatus(
-            !value || (value as string) === "all"
-              ? undefined
-              : (value as PaymentStatus)
-          )
-          setCursor(null)
-          setPrevious([])
-        }}
-      >
-        <SelectTrigger className="min-h-12 text-base">
-          <SelectValue placeholder="Payment status" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All payment statuses</SelectItem>
-          <SelectItem value="pending_review">
-            Waiting for payment check
-          </SelectItem>
-          <SelectItem value="confirmed">Confirmed</SelectItem>
-          <SelectItem value="rejected">Rejected</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select
-        value={itemId}
-        onValueChange={(value) => {
-          setItemId(
-            value === "all" || !value ? undefined : (value as Id<"items">)
-          )
-          setCursor(null)
-          setPrevious([])
-        }}
-      >
-        <SelectTrigger className="min-h-12 text-base">
-          <SelectValue placeholder="Item" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All items</SelectItem>
-          {items?.map((item) => (
-            <SelectItem key={item._id} value={item._id}>
-              {item.name}
+      <div className="grid min-w-44 gap-2">
+        <Label htmlFor={`${prefix}-search`} className="text-base">
+          Search orders
+        </Label>
+        <Input
+          id={`${prefix}-search`}
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value)
+            setCursor(null)
+            setPrevious([])
+          }}
+          placeholder="Reference or guest"
+          className="min-h-12 text-base"
+        />
+      </div>
+      <div className="grid min-w-44 gap-2">
+        <Label id={`${prefix}-payment`} className="text-base">
+          Payment status
+        </Label>
+        <Select
+          value={paymentStatus}
+          onValueChange={(value) => {
+            setPaymentStatus(
+              !value || (value as string) === "all"
+                ? undefined
+                : (value as PaymentStatus)
+            )
+            setCursor(null)
+            setPrevious([])
+          }}
+        >
+          <SelectTrigger
+            aria-labelledby={`${prefix}-payment`}
+            className="min-h-12 text-base"
+          >
+            <SelectValue placeholder="All payment statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All payment statuses</SelectItem>
+            <SelectItem value="pending_review">
+              Waiting for payment check
             </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select
-        value={fulfillmentType}
-        onValueChange={(value) => {
-          setFulfillmentType(
-            !value || (value as string) === "all"
-              ? undefined
-              : (value as "pickup" | "delivery")
-          )
-          setCursor(null)
-          setPrevious([])
-        }}
-      >
-        <SelectTrigger className="min-h-12 text-base">
-          <SelectValue placeholder="Pickup or delivery" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Pickup or delivery</SelectItem>
-          <SelectItem value="pickup">Pickup</SelectItem>
-          <SelectItem value="delivery">Delivery</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select
-        value={fulfillmentOptionId}
-        onValueChange={(value) => {
-          setFulfillmentOptionId(
-            value === "all" || !value
-              ? undefined
-              : (value as Id<"fulfillmentOptions">)
-          )
-          setCursor(null)
-          setPrevious([])
-        }}
-      >
-        <SelectTrigger className="min-h-12 text-base">
-          <SelectValue placeholder="Fulfillment option" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All fulfillment options</SelectItem>
-          {options?.map((option) => (
-            <SelectItem key={option._id} value={option._id}>
-              {option.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select
-        value={progress}
-        onValueChange={(value) => {
-          setProgress(
-            !value || (value as string) === "all"
-              ? undefined
-              : (value as Progress)
-          )
-          setCursor(null)
-          setPrevious([])
-        }}
-      >
-        <SelectTrigger className="min-h-12 text-base">
-          <SelectValue placeholder="Order progress" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All progress</SelectItem>
-          <SelectItem value="pending">Pending</SelectItem>
-          <SelectItem value="preparing">Preparing</SelectItem>
-          <SelectItem value="ready_for_pickup">Ready for pickup</SelectItem>
-          <SelectItem value="dispatched">Sent for delivery</SelectItem>
-          <SelectItem value="fulfilled">Completed</SelectItem>
-        </SelectContent>
-      </Select>
+            <SelectItem value="confirmed">Confirmed</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid min-w-44 gap-2">
+        <Label id={`${prefix}-item`} className="text-base">
+          Item
+        </Label>
+        <Select
+          value={itemId}
+          onValueChange={(value) => {
+            setItemId(
+              value === "all" || !value ? undefined : (value as Id<"items">)
+            )
+            setCursor(null)
+            setPrevious([])
+          }}
+        >
+          <SelectTrigger
+            aria-labelledby={`${prefix}-item`}
+            className="min-h-12 text-base"
+          >
+            <SelectValue placeholder="All items" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All items</SelectItem>
+            {items?.map((item) => (
+              <SelectItem key={item._id} value={item._id}>
+                {item.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid min-w-44 gap-2">
+        <Label id={`${prefix}-type`} className="text-base">
+          Pickup or delivery
+        </Label>
+        <Select
+          value={fulfillmentType}
+          onValueChange={(value) => {
+            setFulfillmentType(
+              !value || (value as string) === "all"
+                ? undefined
+                : (value as "pickup" | "delivery")
+            )
+            setCursor(null)
+            setPrevious([])
+          }}
+        >
+          <SelectTrigger
+            aria-labelledby={`${prefix}-type`}
+            className="min-h-12 text-base"
+          >
+            <SelectValue placeholder="All options" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All options</SelectItem>
+            <SelectItem value="pickup">Pickup</SelectItem>
+            <SelectItem value="delivery">Delivery</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid min-w-44 gap-2">
+        <Label id={`${prefix}-option`} className="text-base">
+          Fulfillment option
+        </Label>
+        <Select
+          value={fulfillmentOptionId}
+          onValueChange={(value) => {
+            setFulfillmentOptionId(
+              value === "all" || !value
+                ? undefined
+                : (value as Id<"fulfillmentOptions">)
+            )
+            setCursor(null)
+            setPrevious([])
+          }}
+        >
+          <SelectTrigger
+            aria-labelledby={`${prefix}-option`}
+            className="min-h-12 text-base"
+          >
+            <SelectValue placeholder="All fulfillment options" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All fulfillment options</SelectItem>
+            {options?.map((option) => (
+              <SelectItem key={option._id} value={option._id}>
+                {option.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid min-w-44 gap-2">
+        <Label id={`${prefix}-progress`} className="text-base">
+          Order progress
+        </Label>
+        <Select
+          value={progress}
+          onValueChange={(value) => {
+            setProgress(
+              !value || (value as string) === "all"
+                ? undefined
+                : (value as Progress)
+            )
+            setCursor(null)
+            setPrevious([])
+          }}
+        >
+          <SelectTrigger
+            aria-labelledby={`${prefix}-progress`}
+            className="min-h-12 text-base"
+          >
+            <SelectValue placeholder="All progress" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All progress</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="preparing">Preparing</SelectItem>
+            <SelectItem value="ready_for_pickup">Ready for pickup</SelectItem>
+            <SelectItem value="dispatched">Sent for delivery</SelectItem>
+            <SelectItem value="fulfilled">Completed</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
     </>
   )
   return (
     <section className="space-y-5" aria-label="Orders">
       <div className="flex flex-wrap gap-3">
-        <div className="hidden flex-1 flex-wrap gap-3 xl:flex">{controls}</div>
+        <div className="hidden flex-1 flex-wrap gap-3 xl:flex">
+          {controls("desktop")}
+        </div>
         <Sheet>
           <SheetTrigger
             render={<Button variant="outline" className="min-h-12 xl:hidden" />}
@@ -239,7 +284,7 @@ export function OrganizerOrders() {
             <SheetHeader>
               <SheetTitle>Filter orders</SheetTitle>
             </SheetHeader>
-            <div className="mt-6 grid gap-4">{controls}</div>
+            <div className="mt-6 grid gap-4">{controls("mobile")}</div>
           </SheetContent>
         </Sheet>
         <Button
@@ -252,7 +297,7 @@ export function OrganizerOrders() {
         </Button>
       </div>
       <div className="hidden overflow-x-auto md:block">
-        <Table>
+        <Table className="[&_td]:text-base [&_th]:text-base">
           <TableHeader>
             <TableRow>
               <TableHead>Reference</TableHead>
@@ -280,6 +325,7 @@ export function OrganizerOrders() {
                   <Button
                     nativeButton={false}
                     variant="outline"
+                    className="min-h-11 text-base"
                     render={
                       <Link href={`/events/${event._id}/orders/${order._id}`} />
                     }

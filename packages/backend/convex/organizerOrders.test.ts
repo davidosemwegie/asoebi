@@ -297,6 +297,11 @@ describe("organizer orders", () => {
       guestName: "Ada",
       guestPhone: "123",
     })
+    const cancelled = await submitted(t, setup, "cancelled@example.com")
+    await setup.owner.client.mutation(api.organizerOrders.cancel, {
+      eventId: setup.eventId,
+      orderId: cancelled.orderId,
+    })
     const summary = await setup.owner.client.query(
       api.organizerOrders.getSummary,
       { eventId: setup.eventId }
@@ -306,6 +311,28 @@ describe("organizer orders", () => {
       paymentsNeedingReview: 1,
       currentOrderValueMinor: 1100,
     })
+    expect(summary.paymentBreakdown).toMatchObject({
+      not_submitted: 0,
+      pending_review: 1,
+      confirmed: 0,
+      rejected: 0,
+    })
+    expect(summary.progressBreakdown).toMatchObject({
+      pending: 1,
+      preparing: 0,
+      ready_for_pickup: 0,
+      dispatched: 0,
+      fulfilled: 0,
+      cancelled: 1,
+    })
+    expect(
+      (
+        await setup.owner.client.query(api.organizerOrders.getDetail, {
+          eventId: setup.eventId,
+          orderId: order.orderId,
+        })
+      )!.eventTimeZone
+    ).toBe("Africa/Lagos")
     await t.run(async (ctx) => {
       expect((await ctx.db.get(setup.itemId))!.reservedQuantity).toBe(1)
       const history = await ctx.db
@@ -408,6 +435,22 @@ describe("organizer orders", () => {
     )
     expect(exported.rows).toHaveLength(25)
     expect(exported.isDone).toBe(false)
+    for (const search of ["x".repeat(121), "x".repeat(160)]) {
+      await expect(
+        setup.owner.client.query(api.organizerOrders.list, {
+          eventId: setup.eventId,
+          search,
+          paginationOpts: { cursor: null, numItems: 20 },
+        })
+      ).rejects.toThrow("Search is too long.")
+      await expect(
+        setup.owner.client.query(internal.organizerOrders.getExportPage, {
+          eventId: setup.eventId,
+          cursor: null,
+          search,
+        })
+      ).rejects.toThrow("Search is too long.")
+    }
     const backfill = await t.mutation(
       internal.organizerOrderAggregateBackfill.backfillPage,
       { cursor: null }

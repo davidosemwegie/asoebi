@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useState } from "react"
 import { useMutation, useQuery } from "convex/react"
+import { LoaderCircleIcon } from "lucide-react"
 
 import { useEventWorkspace } from "@/components/event-workspace"
 import { formatMoney } from "@/lib/money"
@@ -15,6 +16,16 @@ import {
   AlertTitle,
 } from "@workspace/ui/components/alert"
 import { Button } from "@workspace/ui/components/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@workspace/ui/components/alert-dialog"
 import {
   Card,
   CardContent,
@@ -50,7 +61,10 @@ type Detail = {
     paymentStatus: string
     progress: string
     note?: string
+    actorRole: "guest" | "organizer" | "system"
+    actorUserId: string
   }>
+  eventTimeZone: string
   receiptAvailable: boolean
   fulfillmentOptionName?: string
   fulfillmentInstructions?: string
@@ -61,6 +75,10 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
   const event = useEventWorkspace()
   const orderKey = orderId as Id<"orders">
   const [message, setMessage] = useState<string>()
+  const [isMutating, setIsMutating] = useState(false)
+  const [confirmation, setConfirmation] = useState<"reject" | "cancel" | null>(
+    null
+  )
   const [historyCursor, setHistoryCursor] = useState<string | null>(null)
   const [historyPages, setHistoryPages] = useState<Detail["history"]>([])
   const [notificationCursor, setNotificationCursor] = useState<string | null>(
@@ -93,13 +111,22 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
   const advance = useMutation(api.organizerOrders.advanceFulfillment)
   const cancel = useMutation(api.organizerOrders.cancel)
   const retry = useMutation(api.notifications.retryMine)
-  const run = async (operation: () => Promise<unknown>) => {
+  const run = async (
+    operation: () => Promise<unknown>,
+    successMessage = "Order updated."
+  ) => {
+    if (isMutating) return false
     setMessage(undefined)
+    setIsMutating(true)
     try {
       await operation()
-      setMessage("Order updated.")
+      setMessage(successMessage)
+      return true
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Please try again.")
+      return false
+    } finally {
+      setIsMutating(false)
     }
   }
 
@@ -113,6 +140,7 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
       <div className="flex flex-wrap gap-3">
         <Button
           className="min-h-12"
+          disabled={isMutating}
           onClick={() =>
             void run(() =>
               decide({
@@ -128,15 +156,8 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
         <Button
           variant="outline"
           className="min-h-12"
-          onClick={() =>
-            void run(() =>
-              decide({
-                eventId: event._id,
-                orderId: orderKey,
-                decision: "rejected",
-              })
-            )
-          }
+          disabled={isMutating}
+          onClick={() => setConfirmation("reject")}
         >
           Reject payment
         </Button>
@@ -146,6 +167,7 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
       order.progress !== "fulfilled" ? (
       <Button
         className="min-h-12"
+        disabled={isMutating}
         onClick={() =>
           void run(() => advance({ eventId: event._id, orderId: orderKey }))
         }
@@ -158,9 +180,8 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
       <Button
         variant="destructive"
         className="min-h-12"
-        onClick={() =>
-          void run(() => cancel({ eventId: event._id, orderId: orderKey }))
-        }
+        disabled={isMutating}
+        onClick={() => setConfirmation("cancel")}
       >
         Cancel order
       </Button>
@@ -178,10 +199,16 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
       </Button>
       {message ? (
         <Alert
-          variant={message === "Order updated." ? "default" : "destructive"}
+          variant={
+            message !== "Order updated." && message !== "Email retry scheduled."
+              ? "destructive"
+              : "default"
+          }
+          aria-live="polite"
         >
           <AlertTitle>
-            {message === "Order updated."
+            {message === "Order updated." ||
+            message === "Email retry scheduled."
               ? "Saved"
               : "We could not update this order"}
           </AlertTitle>
@@ -200,7 +227,14 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
           {order.guestPhone ? <p>Phone: {order.guestPhone}</p> : null}
           <p>Payment: {paymentStatusLabel(order.paymentStatus)}</p>
           <p>Progress: {progressStatusLabel(order.progress)}</p>
-          <p>Pickup or delivery: {order.fulfillmentType ?? "Not selected"}</p>
+          <p>
+            Pickup or delivery:{" "}
+            {order.fulfillmentType === "delivery"
+              ? "Delivery"
+              : order.fulfillmentType === "pickup"
+                ? "Pickup"
+                : "Not selected"}
+          </p>
           <p>Option: {detail.fulfillmentOptionName ?? "Not selected"}</p>
           {detail.fulfillmentInstructions ? (
             <p>Instructions: {detail.fulfillmentInstructions}</p>
@@ -275,8 +309,18 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
           <ol className="space-y-3">
             {history.map((entry) => (
               <li key={entry._id}>
-                {new Date(entry.createdAt).toLocaleString()}:{" "}
-                {paymentStatusLabel(entry.paymentStatus)} ·{" "}
+                {new Intl.DateTimeFormat("en", {
+                  timeZone: detail.eventTimeZone,
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }).format(entry.createdAt)}{" "}
+                ({detail.eventTimeZone}) —{" "}
+                {entry.actorRole === "organizer"
+                  ? "Organizer"
+                  : entry.actorRole === "guest"
+                    ? "Guest"
+                    : "System"}
+                : {paymentStatusLabel(entry.paymentStatus)} ·{" "}
                 {progressStatusLabel(entry.progress)}
                 {entry.note ? ` — ${entry.note}` : ""}
               </li>
@@ -321,9 +365,11 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
                     <Button
                       variant="outline"
                       className="min-h-11"
+                      disabled={isMutating}
                       onClick={() =>
-                        void run(() =>
-                          retry({ notificationId: notification._id })
+                        void run(
+                          () => retry({ notificationId: notification._id }),
+                          "Email retry scheduled."
                         )
                       }
                     >
@@ -356,6 +402,58 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
         </CardContent>
       </Card>
       {action}
+      <AlertDialog
+        open={confirmation !== null}
+        onOpenChange={(open) => {
+          if (!open && !isMutating) setConfirmation(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmation === "reject"
+                ? "Reject this payment?"
+                : "Cancel this order?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-base">
+              {confirmation === "reject"
+                ? "The guest can submit a new payment receipt if stock is still available."
+                : "This releases any items set aside for this order. This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className="min-h-11 text-base"
+              disabled={isMutating}
+            >
+              Keep order
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="min-h-11 text-base"
+              disabled={isMutating}
+              onClick={() => {
+                const operation =
+                  confirmation === "reject"
+                    ? () =>
+                        decide({
+                          eventId: event._id,
+                          orderId: orderKey,
+                          decision: "rejected",
+                        })
+                    : () => cancel({ eventId: event._id, orderId: orderKey })
+                void run(operation).then((succeeded) => {
+                  if (succeeded) setConfirmation(null)
+                })
+              }}
+            >
+              {isMutating ? (
+                <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
+              ) : null}
+              {confirmation === "reject" ? "Reject payment" : "Cancel order"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }
