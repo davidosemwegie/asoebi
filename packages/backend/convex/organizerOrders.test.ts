@@ -766,6 +766,20 @@ describe("organizer orders", () => {
         updatedAt: Date.now(),
       })
     )
+    await t.run(async (ctx) => {
+      await ctx.db.insert("notifications", {
+        dedupeKey: "malformed-legacy-order-reference",
+        recipient: "malformed@example.com",
+        subject: "Payment confirmed",
+        templateKind: "payment_confirmed",
+        eventRef: `${setup.eventId}`,
+        orderRef: "not-an-order-id",
+        status: "failed",
+        latestAttemptNumber: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    })
     await t.mutation(internal.lifecycleEmailAggregateBackfill.backfillPage, {
       cursor: null,
     })

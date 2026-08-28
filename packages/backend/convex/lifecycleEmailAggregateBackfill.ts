@@ -29,7 +29,13 @@ export const backfillPage = internalMutation({
     let notifications = 0
     for (const notification of page.page) {
       if (!notification.orderRef || notification.invitationRef) continue
-      const order = await ctx.db.get(notification.orderRef as Id<"orders">)
+      let order
+      try {
+        order = await ctx.db.get(notification.orderRef as Id<"orders">)
+      } catch {
+        // Legacy string references are not trusted as typed document IDs.
+        continue
+      }
       if (!order || `${order._id}` !== notification.orderRef) continue
       if (!notification.eventId) {
         await ctx.db.patch(notification._id, { eventId: order.eventId })
