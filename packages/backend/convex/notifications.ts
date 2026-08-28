@@ -12,6 +12,10 @@ import {
 import { authComponent } from "./auth"
 import { requireOwnedEvent } from "./eventModel"
 import {
+  insertLifecycleEmailAggregate,
+  replaceLifecycleEmailAggregate,
+} from "./lifecycleEmailAggregates"
+import {
   deliveryStatus,
   notificationStatus,
   notificationTemplate,
@@ -45,6 +49,7 @@ const enqueueArgs = {
   dedupeKey: v.string(),
   recipient: v.string(),
   ownerId: v.optional(v.string()),
+  eventId: v.optional(v.id("events")),
   eventRef: v.optional(v.string()),
   orderRef: v.optional(v.string()),
   invitationRef: v.optional(v.string()),
@@ -118,6 +123,7 @@ export async function createNotification(
     dedupeKey: string
     recipient: string
     ownerId?: string
+    eventId?: Id<"events">
     eventRef?: string
     orderRef?: string
     invitationRef?: string
@@ -146,6 +152,7 @@ export async function createNotification(
     templateKind: args.template.kind,
     template: args.template,
     ownerId: bounded(args.ownerId, "Owner reference"),
+    eventId: args.eventId,
     eventRef: bounded(args.eventRef, "Event reference"),
     orderRef: bounded(args.orderRef, "Order reference"),
     invitationRef: bounded(args.invitationRef, "Invitation reference"),
@@ -159,6 +166,8 @@ export async function createNotification(
     createdAt: now,
     updatedAt: now,
   })
+  const notification = await ctx.db.get(notificationId)
+  if (notification) await insertLifecycleEmailAggregate(ctx, notification)
   await ctx.db.insert("notificationDeliveries", {
     notificationId,
     attemptNumber: 1,
@@ -294,6 +303,14 @@ export const enqueueRendered = internalMutation({
       latestComponentEmailId: componentEmailId,
       updatedAt: now,
     })
+    const queuedNotification = await ctx.db.get(notification._id)
+    if (queuedNotification) {
+      await replaceLifecycleEmailAggregate(
+        ctx,
+        notification,
+        queuedNotification
+      )
+    }
     await ctx.runMutation(
       internal.eventInvitations.projectNotificationDelivery,
       {
@@ -346,6 +363,14 @@ export const markAttemptFailed = internalMutation({
         status: "failed",
         updatedAt: now,
       })
+      const failedNotification = await ctx.db.get(notification._id)
+      if (failedNotification) {
+        await replaceLifecycleEmailAggregate(
+          ctx,
+          notification,
+          failedNotification
+        )
+      }
       await ctx.runMutation(
         internal.eventInvitations.projectNotificationDelivery,
         {
@@ -505,6 +530,10 @@ async function retryNotification(
     activeAttemptNumber: attemptNumber,
     updatedAt: now,
   })
+  const scheduledNotification = await ctx.db.get(notification._id)
+  if (scheduledNotification) {
+    await replaceLifecycleEmailAggregate(ctx, notification, scheduledNotification)
+  }
   await ctx.scheduler.runAfter(0, internal.emailActions.renderAndEnqueue, {
     notificationId: notification._id,
     attemptNumber,
@@ -713,6 +742,7 @@ async function applyProviderUpdate(
     })
     const currentNotification = await ctx.db.get(notification._id)
     if (currentNotification) {
+      await replaceLifecycleEmailAggregate(ctx, notification, currentNotification)
       await ctx.runMutation(
         internal.eventInvitations.projectNotificationDelivery,
         {

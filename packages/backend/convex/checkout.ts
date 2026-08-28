@@ -1310,6 +1310,7 @@ export const afterSubmit = internalMutation({
       dedupeKey: `order:guest-submitted:${order._id}:${order.submittedAt ?? order.updatedAt}`,
       recipient: order.guestEmail,
       ownerId: event.ownerId,
+      eventId: event._id,
       eventRef: `${event._id}`,
       orderRef: `${order._id}`,
       template: {
@@ -1328,6 +1329,7 @@ export const afterSubmit = internalMutation({
         dedupeKey: `order:organizer-new:${order._id}:${order.submittedAt ?? order.updatedAt}`,
         recipient: owner.email,
         ownerId: event.ownerId,
+        eventId: event._id,
         eventRef: `${event._id}`,
         orderRef: `${order._id}`,
         template: {
@@ -1373,6 +1375,7 @@ export const afterCancellation = internalMutation({
       dedupeKey: `order:guest-cancelled:${order._id}`,
       recipient: order.guestEmail,
       ownerId: event.ownerId,
+      eventId: event._id,
       eventRef: `${event._id}`,
       orderRef: `${order._id}`,
       template: {

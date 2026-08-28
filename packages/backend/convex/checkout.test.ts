@@ -30,6 +30,7 @@ function test() {
   aggregateTest.register(t, "orderValues")
   aggregateTest.register(t, "orderProgressCounts")
   aggregateTest.register(t, "itemDemand")
+  aggregateTest.register(t, "lifecycleEmailCounts")
   return t
 }
 

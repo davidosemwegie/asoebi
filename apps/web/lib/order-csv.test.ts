@@ -19,6 +19,13 @@ describe("order CSV", () => {
         progress: "pending",
         fulfillmentType: "pickup",
         fulfillment: "Collection",
+        fulfillmentInstructions: '=Bring "ID"\nwith you',
+        pickupContact: "Ada, 0800",
+        deliveryRecipientName: "",
+        deliveryPhoneNumber: "",
+        deliveryAddress: "",
+        deliveryAvailability: "",
+        deliveryNotes: "",
         submittedAt: 0,
         reviewedAt: "",
         fulfilledAt: "",
@@ -29,6 +36,9 @@ describe("order CSV", () => {
     expect(csv).toContain("'=cmd()")
     expect(csv).toContain('"Ada, ""A"""')
     expect(csv).toContain('"Lace\nGold"')
+    expect(csv).toContain('"\'=Bring ""ID""\nwith you"')
+    expect(csv).toContain('"Ada, 0800"')
+    expect(csv).toContain("Delivery recipient")
     expect(csv).toContain("1 Jan 1970")
   })
 

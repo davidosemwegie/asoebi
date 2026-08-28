@@ -35,6 +35,18 @@ type Summary = {
   paymentsNeedingReview: number
   completedOrders: number
   confirmedAwaitingPreparation: number
+  lifecycleEmailNeedsAttention: number
+  lifecycleEmail: {
+    scheduled: number
+    queued: number
+    sent: number
+    delivered: number
+    delayed: number
+    failed: number
+    bounced: number
+    complained: number
+    suppressed: number
+  }
   needsAttention: number
   paymentBreakdown: Record<string, number>
   progressBreakdown: Record<string, number>
@@ -140,7 +152,13 @@ function OrganizerOverview() {
           {summary.invitations.ordersSubmitted} submitted orders and{" "}
           {summary.invitations.ordersCompleted} completed orders came from
           invited guests. {summary.confirmedAwaitingPreparation} confirmed
-          orders are waiting to be prepared.
+          orders are waiting to be prepared. Order update emails needing
+          attention: {summary.lifecycleEmailNeedsAttention}. Delayed:{" "}
+          {summary.lifecycleEmail.delayed ?? 0}; failed:{" "}
+          {summary.lifecycleEmail.failed ?? 0}; bounced:{" "}
+          {summary.lifecycleEmail.bounced ?? 0}; complaints:{" "}
+          {summary.lifecycleEmail.complained ?? 0}; blocked:{" "}
+          {summary.lifecycleEmail.suppressed ?? 0}.
         </CardContent>
       </Card>
       <Card>

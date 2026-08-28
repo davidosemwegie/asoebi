@@ -2,6 +2,7 @@
 
 import aggregateTest from "@convex-dev/aggregate/test"
 import betterAuthTest from "@convex-dev/better-auth/test"
+import resendTest from "@convex-dev/resend/test"
 import { convexTest } from "convex-test"
 import { beforeAll, describe, expect, it, vi } from "vitest"
 
@@ -24,12 +25,14 @@ beforeAll(() => {
 function test() {
   const t = convexTest(schema, modules)
   betterAuthTest.register(t)
+  resendTest.register(t)
   aggregateTest.register(t, "invitationDeliveryCounts")
   aggregateTest.register(t, "invitationActivityCounts")
   aggregateTest.register(t, "orderPaymentCounts")
   aggregateTest.register(t, "orderValues")
   aggregateTest.register(t, "orderProgressCounts")
   aggregateTest.register(t, "itemDemand")
+  aggregateTest.register(t, "lifecycleEmailCounts")
   return t
 }
 type Harness = ReturnType<typeof test>
@@ -66,8 +69,12 @@ async function user(t: Harness, email: string) {
   }
 }
 
-async function event(t: Harness, type: "pickup" | "delivery" = "pickup") {
-  const owner = await user(t, `owner-${type}@example.com`)
+async function event(
+  t: Harness,
+  type: "pickup" | "delivery" = "pickup",
+  ownerKey: string = type
+) {
+  const owner = await user(t, `owner-${ownerKey}@example.com`)
   const eventId = await owner.client.mutation(api.events.create, {
     name: "Event",
     description: "d",
@@ -145,7 +152,9 @@ async function submittedLines(
           optionId,
           recipientName: "Ada",
           phoneNumber: "123",
-          address: "Lagos",
+          address: "12, \"Lace\" Road\nLagos",
+          availability: "=Weekdays after 10",
+          notes: "Call before delivery",
         }
   const orderId = await guest.client.mutation(api.checkout.saveDraft, {
     shareToken: setup.shareToken,
@@ -449,9 +458,9 @@ describe("organizer orders", () => {
     })
   })
 
-  it("exports every captured line after an item filter selects an order", async () => {
+  it("exports every captured line and fulfillment details after an item filter selects an order", async () => {
     const t = test()
-    const setup = await event(t)
+    const setup = await event(t, "delivery")
     const geleId = await setup.owner.client.mutation(api.items.create, {
       eventId: setup.eventId,
       name: "Gele, \"special\"",
@@ -479,6 +488,301 @@ describe("organizer orders", () => {
         .map((row) => row.item)
         .sort()
     ).toEqual(['Gele, "special"', "Lace"])
+    expect(
+      exported.rows.filter(
+        (row) => row.reference === listed.page[0]!.reference
+      )
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fulfillmentInstructions: "Bring ID",
+          pickupContact: "",
+          deliveryRecipientName: "Ada",
+          deliveryPhoneNumber: "123",
+          deliveryAddress: '12, "Lace" Road\nLagos',
+          deliveryAvailability: "=Weekdays after 10",
+          deliveryNotes: "Call before delivery",
+        }),
+      ])
+    )
+  })
+
+  it("keeps lifecycle email attention event-scoped and separate from invitation email attention", async () => {
+    const t = test()
+    const setup = await event(t)
+    const other = await event(t, "pickup", "other")
+    const order = await submitted(t, setup, "lifecycle@example.com")
+    const lifecycle = await t.mutation(internal.notifications.enqueueInternal, {
+      dedupeKey: `lifecycle:${order.orderId}`,
+      recipient: "delivered+asoebi-test@resend.dev",
+      ownerId: (await t.run((ctx) => ctx.db.get(setup.eventId)))!.ownerId,
+      eventId: setup.eventId,
+      eventRef: `${setup.eventId}`,
+      orderRef: `${order.orderId}`,
+      template: {
+        kind: "payment_confirmed",
+        recipientName: "Ada",
+        eventName: "Event",
+        orderReference: "ORDER-1",
+        actionUrl: "http://localhost:3000/orders/order",
+      },
+    })
+    await t.mutation(internal.notifications.markAttemptFailed, {
+      notificationId: lifecycle,
+      attemptNumber: 1,
+      error: "Temporary provider failure",
+    })
+    const invitation = await setup.owner.client.mutation(api.eventInvitations.add, {
+      eventId: setup.eventId,
+      name: "Invitation guest",
+      email: "invitation@example.com",
+    })
+    await setup.owner.client.mutation(api.eventInvitations.send, {
+      eventId: setup.eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-lifecycle-attention",
+    })
+    const invitationNotificationId = await t.run(async (ctx) =>
+      (await ctx.db.get(invitation._id))!.currentNotificationId
+    )
+    await t.mutation(internal.notifications.markAttemptFailed, {
+      notificationId: invitationNotificationId!,
+      attemptNumber: 1,
+      error: "Invitation delivery failed",
+    })
+    const failed = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(failed.lifecycleEmail).toMatchObject({ failed: 1, scheduled: 0 })
+    expect(failed.lifecycleEmailNeedsAttention).toBe(1)
+    expect(failed.invitations.needsAttention).toBe(1)
+    expect(failed.needsAttention).toBe(
+        failed.paymentsNeedingReview +
+        failed.confirmedAwaitingPreparation +
+        failed.invitations.needsAttention +
+        failed.lifecycleEmailNeedsAttention
+    )
+    expect(
+      (await other.owner.client.query(api.organizerOrders.getSummary, {
+        eventId: other.eventId,
+      })).lifecycleEmailNeedsAttention
+    ).toBe(0)
+    await t.mutation(internal.notifications.retryInternal, {
+      notificationId: lifecycle,
+    })
+    const retried = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(retried.lifecycleEmail).toMatchObject({ scheduled: 1, failed: 0 })
+    expect(retried.lifecycleEmailNeedsAttention).toBe(0)
+  })
+
+  it("projects lifecycle email status changes, including initial suppression and provider outcomes", async () => {
+    const t = test()
+    const setup = await event(t)
+    const order = await submitted(t, setup, "status-lifecycle@example.com")
+    const ownerId = (await t.run((ctx) => ctx.db.get(setup.eventId)))!.ownerId
+    const makeLifecycle = async (suffix: string, recipient: string) =>
+      await t.mutation(internal.notifications.enqueueInternal, {
+        dedupeKey: `lifecycle-status:${suffix}:${order.orderId}`,
+        recipient,
+        ownerId,
+        eventId: setup.eventId,
+        eventRef: `${setup.eventId}`,
+        orderRef: `${order.orderId}`,
+        template: {
+          kind: "organizer_new_order",
+          recipientName: "Ada",
+          guestName: "Ada",
+          eventName: "Event",
+          orderReference: "ORDER-2",
+          actionUrl: "http://localhost:3000/orders/order",
+        },
+      })
+    const notificationId = await makeLifecycle(
+      "provider",
+      "delivered+asoebi-test@resend.dev"
+    )
+    const componentEmailId = await t.mutation(
+      internal.notifications.enqueueRendered,
+      {
+        notificationId,
+        attemptNumber: 1,
+        to: "delivered+asoebi-test@resend.dev",
+        html: "<p>Order update</p>",
+        text: "Order update",
+      }
+    )
+    let summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.queued).toBe(1)
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId,
+      attemptNumber: 1,
+      componentEmailId,
+      status: "sent",
+      permanent: false,
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.sent).toBe(1)
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId,
+      attemptNumber: 1,
+      componentEmailId,
+      status: "delivered",
+      permanent: false,
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail).toMatchObject({ sent: 0, delivered: 1 })
+    const delayedId = await makeLifecycle(
+      "delayed",
+      "delivered+asoebi-test@resend.dev"
+    )
+    const delayedComponentId = await t.mutation(
+      internal.notifications.enqueueRendered,
+      {
+        notificationId: delayedId,
+        attemptNumber: 1,
+        to: "delivered+asoebi-test@resend.dev",
+        html: "<p>Order update</p>",
+        text: "Order update",
+      }
+    )
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId: delayedId,
+      attemptNumber: 1,
+      componentEmailId: delayedComponentId,
+      status: "delayed",
+      permanent: false,
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.delayed).toBe(1)
+    expect(summary.lifecycleEmailNeedsAttention).toBe(1)
+    await t.mutation(internal.notifications.retryInternal, {
+      notificationId: delayedId,
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail).toMatchObject({ delayed: 0, scheduled: 1 })
+
+    const providerFailedId = await makeLifecycle(
+      "provider-failed",
+      "delivered+asoebi-test@resend.dev"
+    )
+    const failedComponentId = await t.mutation(
+      internal.notifications.enqueueRendered,
+      {
+        notificationId: providerFailedId,
+        attemptNumber: 1,
+        to: "delivered+asoebi-test@resend.dev",
+        html: "<p>Order update</p>",
+        text: "Order update",
+      }
+    )
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId: providerFailedId,
+      attemptNumber: 1,
+      componentEmailId: failedComponentId,
+      status: "failed",
+      permanent: false,
+      reason: "Provider API retries were exhausted",
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.failed).toBe(1)
+
+    const permanentId = await makeLifecycle(
+      "permanent",
+      "delivered+asoebi-test@resend.dev"
+    )
+    const permanentComponentId = await t.mutation(
+      internal.notifications.enqueueRendered,
+      {
+        notificationId: permanentId,
+        attemptNumber: 1,
+        to: "delivered+asoebi-test@resend.dev",
+        html: "<p>Order update</p>",
+        text: "Order update",
+      }
+    )
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId: permanentId,
+      attemptNumber: 1,
+      componentEmailId: permanentComponentId,
+      status: "bounced",
+      permanent: true,
+      reason: "Mailbox unavailable",
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.bounced).toBe(1)
+    expect(summary.lifecycleEmailNeedsAttention).toBe(2)
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("notifications", {
+        dedupeKey: "recipient-suppressed",
+        recipient: "suppressed@example.com",
+        subject: "Previous delivery",
+        templateKind: "verify_email",
+        status: "suppressed",
+        latestAttemptNumber: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    })
+    await makeLifecycle("initial-suppression", "suppressed@example.com")
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.suppressed).toBe(1)
+  })
+
+  it("backfills legacy lifecycle email projections without counting invitation email", async () => {
+    const t = test()
+    const setup = await event(t)
+    const order = await submitted(t, setup, "legacy@example.com")
+    const legacyId = await t.run(async (ctx) =>
+      await ctx.db.insert("notifications", {
+        dedupeKey: `legacy:${order.orderId}`,
+        recipient: "legacy@example.com",
+        subject: "Payment confirmed",
+        templateKind: "payment_confirmed",
+        ownerId: (await ctx.db.get(setup.eventId))!.ownerId,
+        eventRef: `${setup.eventId}`,
+        orderRef: `${order.orderId}`,
+        status: "failed",
+        latestAttemptNumber: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    )
+    await t.mutation(internal.lifecycleEmailAggregateBackfill.backfillPage, {
+      cursor: null,
+    })
+    const once = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(once.lifecycleEmail.failed).toBe(1)
+    await t.mutation(internal.lifecycleEmailAggregateBackfill.backfillPage, {
+      cursor: null,
+    })
+    const twice = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(twice.lifecycleEmail.failed).toBe(1)
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(legacyId))!.eventId).toEqual(setup.eventId)
+    })
   })
 
   it("returns bounded sparse pages for combined filters and resumes list/export", async () => {

@@ -22,6 +22,12 @@ crons.interval(
   internal.organizerOrderAggregateBackfill.backfillPage,
   { cursor: null }
 )
+crons.interval(
+  "backfill lifecycle email aggregates",
+  { hours: 24 },
+  internal.lifecycleEmailAggregateBackfill.backfillPage,
+  { cursor: null }
+)
 
 crons.interval(
   "clean finalized email bodies",

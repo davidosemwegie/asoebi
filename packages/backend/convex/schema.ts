@@ -479,10 +479,13 @@ export default defineSchema({
     dedupeKey: v.string(),
     recipient: v.string(),
     subject: v.string(),
-    templateKind: notificationTemplateKind,
-    template: v.optional(notificationTemplate),
-    ownerId: v.optional(v.string()),
-    eventRef: v.optional(v.string()),
+  templateKind: notificationTemplateKind,
+  template: v.optional(notificationTemplate),
+  ownerId: v.optional(v.string()),
+  // A typed event projection keeps lifecycle-email reporting tenant-scoped.
+  // It is optional so previously stored notifications can be backfilled safely.
+  eventId: v.optional(v.id("events")),
+  eventRef: v.optional(v.string()),
     orderRef: v.optional(v.string()),
     invitationRef: v.optional(v.string()),
     status: notificationStatus,
@@ -501,6 +504,11 @@ export default defineSchema({
     .index("by_dedupeKey", ["dedupeKey"])
     .index("by_recipient_and_status", ["recipient", "status", "updatedAt"])
     .index("by_ownerId_and_updatedAt", ["ownerId", "updatedAt"])
+    .index("by_eventId_and_status_and_updatedAt", [
+      "eventId",
+      "status",
+      "updatedAt",
+    ])
     .index("by_eventRef_and_updatedAt", ["eventRef", "updatedAt"])
     .index("by_orderRef_and_updatedAt", ["orderRef", "updatedAt"])
     .index("by_invitationRef_and_updatedAt", ["invitationRef", "updatedAt"])

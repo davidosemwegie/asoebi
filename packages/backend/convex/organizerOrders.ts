@@ -26,6 +26,7 @@ import {
   replaceLineAggregate,
   replaceOrderAggregate,
 } from "./organizerOrderAggregates"
+import { lifecycleEmailCounts } from "./lifecycleEmailAggregates"
 import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import {
@@ -104,6 +105,18 @@ const organizerSummaryResult = v.object({
   paymentBreakdown: paymentBreakdownResult,
   progressBreakdown: progressBreakdownResult,
   confirmedAwaitingPreparation: v.number(),
+  lifecycleEmailNeedsAttention: v.number(),
+  lifecycleEmail: v.object({
+    scheduled: v.number(),
+    queued: v.number(),
+    sent: v.number(),
+    delivered: v.number(),
+    delayed: v.number(),
+    failed: v.number(),
+    bounced: v.number(),
+    complained: v.number(),
+    suppressed: v.number(),
+  }),
   needsAttention: v.number(),
   items: v.array(
     v.object({
@@ -143,6 +156,13 @@ const exportRowResult = v.object({
   progress: orderProgress,
   fulfillment: v.string(),
   fulfillmentType: v.string(),
+  fulfillmentInstructions: v.string(),
+  pickupContact: v.string(),
+  deliveryRecipientName: v.string(),
+  deliveryPhoneNumber: v.string(),
+  deliveryAddress: v.string(),
+  deliveryAvailability: v.string(),
+  deliveryNotes: v.string(),
   submittedAt: v.number(),
   reviewedAt: v.union(v.number(), v.string()),
   fulfilledAt: v.union(v.number(), v.string()),
@@ -163,6 +183,17 @@ const listArgs = {
 }
 const paymentStatuses = ["not_submitted", "pending_review", "confirmed", "rejected"] as const
 const progressStatuses = ["pending", "preparing", "ready_for_pickup", "dispatched", "fulfilled", "cancelled"] as const
+const lifecycleEmailStatuses = [
+  "scheduled",
+  "queued",
+  "sent",
+  "delivered",
+  "delayed",
+  "failed",
+  "bounced",
+  "complained",
+  "suppressed",
+] as const
 
 const orderHistoryResult = v.object({
   _id: v.id("orderStatusHistory"),
@@ -217,6 +248,13 @@ function submittedPaymentProgressBounds(paymentStatus: string, progress: string)
 }
 
 function invitationBounds(value: string) {
+  return {
+    lower: { key: value, inclusive: true },
+    upper: { key: value, inclusive: true },
+  }
+}
+
+function lifecycleEmailBounds(value: string) {
   return {
     lower: { key: value, inclusive: true },
     upper: { key: value, inclusive: true },
@@ -912,6 +950,20 @@ export const getSummary = query({
         await orderPaymentCounts.count(ctx, { namespace: eventId, bounds: submittedPaymentBounds(paymentStatus) }),
       ] as const)
     )
+    const lifecycleCounts = await Promise.all(
+      lifecycleEmailStatuses.map((status) =>
+        lifecycleEmailCounts.count(ctx, {
+          namespace: `${eventId}`,
+          bounds: lifecycleEmailBounds(status),
+        })
+      )
+    )
+    const lifecycleEmailNeedsAttention =
+      lifecycleCounts[4]! +
+      lifecycleCounts[5]! +
+      lifecycleCounts[6]! +
+      lifecycleCounts[7]! +
+      lifecycleCounts[8]!
     const progressCounts = await Promise.all(
       progressStatuses.map(async (progress) => {
         const counts = await Promise.all(
@@ -951,12 +1003,25 @@ export const getSummary = query({
         cancelled: progressCounts[5]![1],
       },
       confirmedAwaitingPreparation,
+      lifecycleEmailNeedsAttention,
+      lifecycleEmail: {
+        scheduled: lifecycleCounts[0]!,
+        queued: lifecycleCounts[1]!,
+        sent: lifecycleCounts[2]!,
+        delivered: lifecycleCounts[3]!,
+        delayed: lifecycleCounts[4]!,
+        failed: lifecycleCounts[5]!,
+        bounced: lifecycleCounts[6]!,
+        complained: lifecycleCounts[7]!,
+        suppressed: lifecycleCounts[8]!,
+      },
       needsAttention:
         needsPaymentCheck +
         confirmedAwaitingPreparation +
         delayed +
         failed +
-        suppressed,
+        suppressed +
+        lifecycleEmailNeedsAttention,
       items: demand.map(({ item, requested }) => ({
         itemId: item._id,
         name: item.name,
@@ -1122,6 +1187,14 @@ export const getExportPage = internalQuery({
           progress: order.progress,
           fulfillment: order.fulfillmentOptionName ?? "",
           fulfillmentType: order.fulfillmentType ?? "",
+          fulfillmentInstructions: order.fulfillmentInstructions ?? "",
+          pickupContact: order.fulfillmentDetails?.pickupContact ?? "",
+          deliveryRecipientName:
+            order.fulfillmentDetails?.recipientName ?? "",
+          deliveryPhoneNumber: order.fulfillmentDetails?.phoneNumber ?? "",
+          deliveryAddress: order.fulfillmentDetails?.address ?? "",
+          deliveryAvailability: order.fulfillmentDetails?.availability ?? "",
+          deliveryNotes: order.fulfillmentDetails?.notes ?? "",
           submittedAt: order.submittedAt ?? order.createdAt,
           reviewedAt: order.reviewedAt ?? "",
           fulfilledAt: order.progress === "fulfilled" ? order.updatedAt : "",
@@ -1197,6 +1270,7 @@ async function notify(
     dedupeKey: `order:${kind}:${order._id}:${transitionId}`,
     recipient: order.guestEmail,
     ownerId: event.ownerId,
+    eventId: event._id,
     eventRef: `${event._id}`,
     orderRef: `${order._id}`,
     template: lifecycleTemplate(kind, {

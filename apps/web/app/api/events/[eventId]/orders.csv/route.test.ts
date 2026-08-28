@@ -26,6 +26,13 @@ const row = {
   progress: "pending",
   fulfillment: "Pickup",
   fulfillmentType: "pickup",
+  fulfillmentInstructions: '=Bring "ID"\nwith you',
+  pickupContact: "Ada, 0800",
+  deliveryRecipientName: "",
+  deliveryPhoneNumber: "",
+  deliveryAddress: "",
+  deliveryAvailability: "",
+  deliveryNotes: "",
   submittedAt: 0,
   reviewedAt: "",
   fulfilledAt: "",
@@ -79,6 +86,8 @@ describe("organizer CSV stream", () => {
     expect(csv).toContain("'=formula()")
     expect(csv).toContain('"Ada, ""A"""')
     expect(csv).toContain("cancelled")
+    expect(csv).toContain("Fulfillment instructions")
+    expect(csv).toContain('"\'=Bring ""ID""\nwith you"')
     expect(csv).toContain("SECOND")
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[0]?.[1]).toEqual({

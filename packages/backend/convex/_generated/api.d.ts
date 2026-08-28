@@ -23,6 +23,8 @@ import type * as eventSetup from "../eventSetup.js"
 import type * as events from "../events.js"
 import type * as http from "../http.js"
 import type * as items from "../items.js"
+import type * as lifecycleEmailAggregateBackfill from "../lifecycleEmailAggregateBackfill.js"
+import type * as lifecycleEmailAggregates from "../lifecycleEmailAggregates.js"
 import type * as notificationTypes from "../notificationTypes.js"
 import type * as notifications from "../notifications.js"
 import type * as orderModel from "../orderModel.js"
@@ -55,6 +57,8 @@ declare const fullApi: ApiFromModules<{
   events: typeof events
   http: typeof http
   items: typeof items
+  lifecycleEmailAggregateBackfill: typeof lifecycleEmailAggregateBackfill
+  lifecycleEmailAggregates: typeof lifecycleEmailAggregates
   notificationTypes: typeof notificationTypes
   notifications: typeof notifications
   orderModel: typeof orderModel
@@ -101,4 +105,5 @@ export declare const components: {
   orderValues: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"orderValues">
   orderProgressCounts: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"orderProgressCounts">
   itemDemand: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"itemDemand">
+  lifecycleEmailCounts: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"lifecycleEmailCounts">
 }

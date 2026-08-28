@@ -37,6 +37,13 @@ export function createOrderCsv(rows: Array<Record<string, unknown>>) {
     "Progress",
     "Pickup or delivery",
     "Fulfillment option",
+    "Fulfillment instructions",
+    "Pickup contact",
+    "Delivery recipient",
+    "Delivery phone",
+    "Delivery address",
+    "Delivery availability",
+    "Delivery notes",
     "Submitted",
     "Payment decision",
     "Completed",
@@ -57,6 +64,13 @@ export function createOrderCsv(rows: Array<Record<string, unknown>>) {
       row.progress,
       row.fulfillmentType,
       row.fulfillment,
+      row.fulfillmentInstructions,
+      row.pickupContact,
+      row.deliveryRecipientName,
+      row.deliveryPhoneNumber,
+      row.deliveryAddress,
+      row.deliveryAvailability,
+      row.deliveryNotes,
       formatEventTime(row.submittedAt, String(row.timeZone)),
       formatEventTime(row.reviewedAt, String(row.timeZone)),
       formatEventTime(row.fulfilledAt, String(row.timeZone)),
@@ -68,7 +82,7 @@ export function createOrderCsv(rows: Array<Record<string, unknown>>) {
 }
 
 export function orderCsvHeader() {
-  return `\uFEFF${["Order reference", "Guest", "Email", "Phone", "Item", "Quantity", "Unit price", "Line total", "Order total", "Currency", "Payment status", "Progress", "Pickup or delivery", "Fulfillment option", "Submitted", "Payment decision", "Completed"].map(safeCell).join(",")}\r\n`
+  return `\uFEFF${["Order reference", "Guest", "Email", "Phone", "Item", "Quantity", "Unit price", "Line total", "Order total", "Currency", "Payment status", "Progress", "Pickup or delivery", "Fulfillment option", "Fulfillment instructions", "Pickup contact", "Delivery recipient", "Delivery phone", "Delivery address", "Delivery availability", "Delivery notes", "Submitted", "Payment decision", "Completed"].map(safeCell).join(",")}\r\n`
 }
 
 export function orderCsvRow(row: Record<string, unknown>) {
@@ -88,6 +102,13 @@ export function orderCsvRow(row: Record<string, unknown>) {
       row.progress,
       row.fulfillmentType,
       row.fulfillment,
+      row.fulfillmentInstructions,
+      row.pickupContact,
+      row.deliveryRecipientName,
+      row.deliveryPhoneNumber,
+      row.deliveryAddress,
+      row.deliveryAvailability,
+      row.deliveryNotes,
       formatEventTime(row.submittedAt, String(row.timeZone)),
       formatEventTime(row.reviewedAt, String(row.timeZone)),
       formatEventTime(row.fulfilledAt, String(row.timeZone)),
