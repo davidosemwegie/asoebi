@@ -3,6 +3,13 @@ import type { FunctionReference } from "convex/server"
 
 import { createNotification } from "./notifications"
 import {
+  deleteLineAggregate,
+  insertLineAggregate,
+  insertOrderAggregate,
+  replaceLineAggregate,
+  replaceOrderAggregate,
+} from "./organizerOrderAggregates"
+import {
   MAX_ORDER_LINES,
   REQUEST_RECEIPT_TTL,
   adjustReservations,
@@ -155,10 +162,13 @@ async function writeLines(
   oldLines: Doc<"orderLines">[],
   lines: Awaited<ReturnType<typeof buildOrderSnapshot>>["lines"]
 ) {
-  for (const line of oldLines) await ctx.db.delete(line._id)
+  for (const line of oldLines) {
+    await ctx.db.delete(line._id)
+    await deleteLineAggregate(ctx, line)
+  }
   const now = Date.now()
   for (const line of lines) {
-    await ctx.db.insert("orderLines", {
+    const lineId = await ctx.db.insert("orderLines", {
       ...line,
       eventId: order.eventId,
       orderId: order._id,
@@ -171,6 +181,9 @@ async function writeLines(
       createdAt: now,
       updatedAt: now,
     })
+    const created = await ctx.db.get(lineId)
+    if (!created) throw new Error("Order line could not be saved.")
+    await insertLineAggregate(ctx, created)
   }
 }
 
@@ -184,6 +197,9 @@ async function patchLineProjections(ctx: MutationCtx, order: Doc<"orders">) {
       fulfillmentOptionId: order.fulfillmentOptionId,
       updatedAt: Date.now(),
     })
+    const updated = await ctx.db.get(line._id)
+    if (!updated) throw new Error("Order line could not be updated.")
+    await replaceLineAggregate(ctx, line, updated)
   }
 }
 
@@ -342,6 +358,7 @@ async function createDraft(
   })
   const order = await ctx.db.get(orderId)
   if (!order) throw new Error("Draft order could not be created.")
+  await insertOrderAggregate(ctx, order)
   return order
 }
 
@@ -623,6 +640,7 @@ export const saveDraft = mutation({
     await ctx.db.patch(order._id, patch)
     const updated = await ctx.db.get(order._id)
     if (!updated) throw new Error("Draft order could not be saved.")
+    await replaceOrderAggregate(ctx, order, updated)
     await writeLines(ctx, updated, oldLines, snapshotLines)
     return order._id
   },
@@ -709,6 +727,7 @@ export const submit = mutation({
     })
     const updated = await ctx.db.get(order._id)
     if (!updated) throw new Error("Order could not be submitted.")
+    await replaceOrderAggregate(ctx, order, updated)
     await ctx.db.patch(proof._id, { orderId: updated._id })
     await writeLines(ctx, updated, oldLines, snapshotLines)
     await appendOrderHistory(ctx, {
@@ -829,6 +848,7 @@ export const updatePending = mutation({
     })
     const updated = await ctx.db.get(order._id)
     if (!updated) throw new Error("Order could not be updated.")
+    await replaceOrderAggregate(ctx, order, updated)
     await ctx.db.patch(proof._id, { orderId: updated._id })
     await writeLines(ctx, updated, oldLines, snapshotLines)
     await storeReceipt(ctx, {
@@ -924,6 +944,7 @@ export const resubmitRejected = mutation({
     })
     const updated = await ctx.db.get(order._id)
     if (!updated) throw new Error("Order could not be resubmitted.")
+    await replaceOrderAggregate(ctx, order, updated)
     await ctx.db.patch(proof._id, { orderId: updated._id })
     await writeLines(ctx, updated, oldLines, snapshotLines)
     await appendOrderHistory(ctx, {
@@ -991,6 +1012,7 @@ export const cancelMine = mutation({
     })
     const updated = await ctx.db.get(order._id)
     if (!updated) throw new Error("Order could not be cancelled.")
+    await replaceOrderAggregate(ctx, order, updated)
     await patchLineProjections(ctx, updated)
     await appendOrderHistory(ctx, {
       order,
@@ -1288,6 +1310,7 @@ export const afterSubmit = internalMutation({
       dedupeKey: `order:guest-submitted:${order._id}:${order.submittedAt ?? order.updatedAt}`,
       recipient: order.guestEmail,
       ownerId: event.ownerId,
+      eventId: event._id,
       eventRef: `${event._id}`,
       orderRef: `${order._id}`,
       template: {
@@ -1306,6 +1329,7 @@ export const afterSubmit = internalMutation({
         dedupeKey: `order:organizer-new:${order._id}:${order.submittedAt ?? order.updatedAt}`,
         recipient: owner.email,
         ownerId: event.ownerId,
+        eventId: event._id,
         eventRef: `${event._id}`,
         orderRef: `${order._id}`,
         template: {
@@ -1351,6 +1375,7 @@ export const afterCancellation = internalMutation({
       dedupeKey: `order:guest-cancelled:${order._id}`,
       recipient: order.guestEmail,
       ownerId: event.ownerId,
+      eventId: event._id,
       eventRef: `${event._id}`,
       orderRef: `${order._id}`,
       template: {

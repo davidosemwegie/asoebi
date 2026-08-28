@@ -26,6 +26,11 @@ function test() {
   betterAuthTest.register(t)
   aggregateTest.register(t, "invitationDeliveryCounts")
   aggregateTest.register(t, "invitationActivityCounts")
+  aggregateTest.register(t, "orderPaymentCounts")
+  aggregateTest.register(t, "orderValues")
+  aggregateTest.register(t, "orderProgressCounts")
+  aggregateTest.register(t, "itemDemand")
+  aggregateTest.register(t, "lifecycleEmailCounts")
   return t
 }
 
@@ -182,20 +187,10 @@ async function rejectSubmittedOrder(
   event: Awaited<ReturnType<typeof readyEvent>>,
   orderId: Id<"orders">
 ) {
-  await t.run(async (ctx) => {
-    const order = await ctx.db.get(orderId)
-    if (!order) throw new Error("missing order")
-    const item = await ctx.db.get(event.itemId)
-    if (!item) throw new Error("missing item")
-    await ctx.db.patch(orderId, {
-      paymentStatus: "rejected",
-      reservationState: "released",
-      updatedAt: Date.now(),
-    })
-    await ctx.db.patch(item._id, {
-      reservedQuantity: 0,
-      updatedAt: Date.now(),
-    })
+  await event.owner.client.mutation(api.organizerOrders.decidePayment, {
+    eventId: event.eventId,
+    orderId,
+    decision: "rejected",
   })
 }
 
@@ -655,12 +650,10 @@ describe("guest checkout", () => {
       })
     ).rejects.toThrow("no longer accepting")
     const replacementProof = await proofFor(t, orderId, draft.guest.userId)
-    await t.run(async (ctx) => {
-      await ctx.db.patch(orderId, {
-        paymentStatus: "rejected",
-        reservationState: "released",
-      })
-      await ctx.db.patch(event.itemId, { reservedQuantity: 0 })
+    await event.owner.client.mutation(api.organizerOrders.decidePayment, {
+      eventId: event.eventId,
+      orderId,
+      decision: "rejected",
     })
     await expect(
       draft.guest.client.mutation(api.checkout.resubmitRejected, {

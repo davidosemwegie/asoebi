@@ -4,8 +4,17 @@ import {
   type EmailId,
 } from "@convex-dev/resend"
 import { ConvexError, v } from "convex/values"
+import {
+  paginationOptsValidator,
+  paginationResultValidator,
+} from "convex/server"
 
 import { authComponent } from "./auth"
+import { requireOwnedEvent } from "./eventModel"
+import {
+  insertLifecycleEmailAggregate,
+  replaceLifecycleEmailAggregate,
+} from "./lifecycleEmailAggregates"
 import {
   deliveryStatus,
   notificationStatus,
@@ -40,12 +49,23 @@ const enqueueArgs = {
   dedupeKey: v.string(),
   recipient: v.string(),
   ownerId: v.optional(v.string()),
+  eventId: v.optional(v.id("events")),
   eventRef: v.optional(v.string()),
   orderRef: v.optional(v.string()),
   invitationRef: v.optional(v.string()),
   payloadExpiresAt: v.optional(v.number()),
   template: notificationTemplate,
 }
+
+const orderNotificationResult = v.object({
+  _id: v.id("notifications"),
+  subject: v.string(),
+  status: notificationStatus,
+  latestAttemptNumber: v.number(),
+  retryBlockedReason: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
 
 function normalizeEmail(value: string) {
   const email = value.trim().toLowerCase()
@@ -103,6 +123,7 @@ export async function createNotification(
     dedupeKey: string
     recipient: string
     ownerId?: string
+    eventId?: Id<"events">
     eventRef?: string
     orderRef?: string
     invitationRef?: string
@@ -131,6 +152,7 @@ export async function createNotification(
     templateKind: args.template.kind,
     template: args.template,
     ownerId: bounded(args.ownerId, "Owner reference"),
+    eventId: args.eventId,
     eventRef: bounded(args.eventRef, "Event reference"),
     orderRef: bounded(args.orderRef, "Order reference"),
     invitationRef: bounded(args.invitationRef, "Invitation reference"),
@@ -144,6 +166,8 @@ export async function createNotification(
     createdAt: now,
     updatedAt: now,
   })
+  const notification = await ctx.db.get(notificationId)
+  if (notification) await insertLifecycleEmailAggregate(ctx, notification)
   await ctx.db.insert("notificationDeliveries", {
     notificationId,
     attemptNumber: 1,
@@ -279,6 +303,14 @@ export const enqueueRendered = internalMutation({
       latestComponentEmailId: componentEmailId,
       updatedAt: now,
     })
+    const queuedNotification = await ctx.db.get(notification._id)
+    if (queuedNotification) {
+      await replaceLifecycleEmailAggregate(
+        ctx,
+        notification,
+        queuedNotification
+      )
+    }
     await ctx.runMutation(
       internal.eventInvitations.projectNotificationDelivery,
       {
@@ -331,6 +363,14 @@ export const markAttemptFailed = internalMutation({
         status: "failed",
         updatedAt: now,
       })
+      const failedNotification = await ctx.db.get(notification._id)
+      if (failedNotification) {
+        await replaceLifecycleEmailAggregate(
+          ctx,
+          notification,
+          failedNotification
+        )
+      }
       await ctx.runMutation(
         internal.eventInvitations.projectNotificationDelivery,
         {
@@ -411,6 +451,47 @@ export const getMine = query({
   },
 })
 
+/** Owner-scoped, cursor-paginated notification history for one organizer order. */
+export const listOrderHistory = query({
+  args: {
+    eventId: v.id("events"),
+    orderId: v.id("orders"),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: paginationResultValidator(orderNotificationResult),
+  handler: async (ctx, args) => {
+    const event = await requireOwnedEvent(ctx, args.eventId)
+    const order = await ctx.db.get(args.orderId)
+    if (!order || order.eventId !== event._id)
+      throw new ConvexError("Order not found.")
+    const page = await ctx.db
+      .query("notifications")
+      .withIndex("by_orderRef_and_updatedAt", (q) =>
+        q.eq("orderRef", `${order._id}`)
+      )
+      .order("desc")
+      .paginate(args.paginationOpts)
+    return {
+      ...page,
+      page: page.page
+        .filter(
+          (notification) =>
+            notification.ownerId === event.ownerId &&
+            notification.eventRef === `${event._id}`
+        )
+        .map((notification) => ({
+          _id: notification._id,
+          subject: notification.subject,
+          status: notification.status,
+          latestAttemptNumber: notification.latestAttemptNumber,
+          retryBlockedReason: notification.retryBlockedReason,
+          createdAt: notification.createdAt,
+          updatedAt: notification.updatedAt,
+        })),
+    }
+  },
+})
+
 async function retryNotification(
   ctx: MutationCtx,
   notification: Doc<"notifications">
@@ -449,6 +530,10 @@ async function retryNotification(
     activeAttemptNumber: attemptNumber,
     updatedAt: now,
   })
+  const scheduledNotification = await ctx.db.get(notification._id)
+  if (scheduledNotification) {
+    await replaceLifecycleEmailAggregate(ctx, notification, scheduledNotification)
+  }
   await ctx.scheduler.runAfter(0, internal.emailActions.renderAndEnqueue, {
     notificationId: notification._id,
     attemptNumber,
@@ -657,6 +742,7 @@ async function applyProviderUpdate(
     })
     const currentNotification = await ctx.db.get(notification._id)
     if (currentNotification) {
+      await replaceLifecycleEmailAggregate(ctx, notification, currentNotification)
       await ctx.runMutation(
         internal.eventInvitations.projectNotificationDelivery,
         {

@@ -1,0 +1,1019 @@
+/// <reference types="vite/client" />
+
+import aggregateTest from "@convex-dev/aggregate/test"
+import betterAuthTest from "@convex-dev/better-auth/test"
+import resendTest from "@convex-dev/resend/test"
+import { convexTest } from "convex-test"
+import { beforeAll, describe, expect, it, vi } from "vitest"
+
+import { api, components, internal } from "./_generated/api"
+import type { Id } from "./_generated/dataModel"
+import schema from "./schema"
+
+const modules = import.meta.glob("./**/*.ts")
+const DAY = 86_400_000
+
+beforeAll(() => {
+  vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-that-is-at-least-32-characters")
+  vi.stubEnv("SITE_URL", "http://localhost:3000")
+  vi.stubEnv("RESEND_API_KEY", "re_test_only")
+  vi.stubEnv("RESEND_WEBHOOK_SECRET", "whsec_test_only")
+  vi.stubEnv("EMAIL_FROM", "Aso Circle <onboarding@resend.dev>")
+  vi.stubEnv("EMAIL_DELIVERY_MODE", "test")
+})
+
+function test() {
+  const t = convexTest(schema, modules)
+  betterAuthTest.register(t)
+  resendTest.register(t)
+  aggregateTest.register(t, "invitationDeliveryCounts")
+  aggregateTest.register(t, "invitationActivityCounts")
+  aggregateTest.register(t, "orderPaymentCounts")
+  aggregateTest.register(t, "orderValues")
+  aggregateTest.register(t, "orderProgressCounts")
+  aggregateTest.register(t, "itemDemand")
+  aggregateTest.register(t, "lifecycleEmailCounts")
+  return t
+}
+type Harness = ReturnType<typeof test>
+
+async function user(t: Harness, email: string) {
+  const now = Date.now()
+  const account = await t.mutation(components.betterAuth.adapter.create, {
+    input: {
+      model: "user",
+      data: {
+        name: email,
+        email,
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+  })
+  const session = await t.mutation(components.betterAuth.adapter.create, {
+    input: {
+      model: "session",
+      data: {
+        userId: account._id,
+        token: `token-${email}`,
+        expiresAt: now + DAY,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+  })
+  return {
+    userId: account._id,
+    client: t.withIdentity({ subject: account._id, sessionId: session._id }),
+  }
+}
+
+async function event(
+  t: Harness,
+  type: "pickup" | "delivery" = "pickup",
+  ownerKey: string = type
+) {
+  const owner = await user(t, `owner-${ownerKey}@example.com`)
+  const eventId = await owner.client.mutation(api.events.create, {
+    name: "Event",
+    description: "d",
+    eventDate: "2027-12-01",
+    orderDeadline: "2027-11-01",
+    orderDeadlineAt: Date.now() + DAY,
+    timeZone: "Africa/Lagos",
+    location: "Lagos",
+    contact: "Ada",
+    currency: "NGN",
+  })
+  const itemId = await owner.client.mutation(api.items.create, {
+    eventId,
+    name: "Lace",
+    unitLabel: "piece",
+    priceMinor: 1000,
+    inventoryTotal: 20,
+  })
+  const optionId = await owner.client.mutation(
+    api.eventSetup.createFulfillmentOption,
+    {
+      eventId,
+      name: type,
+      type,
+      feeMinor: 100,
+      instructions: "Bring ID",
+      enabled: true,
+      requiredFields:
+        type === "pickup"
+          ? { kind: "pickup", pickupContact: true }
+          : {
+              kind: "delivery",
+              recipientName: true,
+              phoneNumber: true,
+              address: true,
+              availability: false,
+              notes: false,
+            },
+    }
+  )
+  await owner.client.mutation(api.eventSetup.savePaymentInstructions, {
+    eventId,
+    instructions: "Pay",
+  })
+  await owner.client.mutation(api.events.publish, { eventId })
+  const published = await owner.client.query(api.events.get, {
+    eventId,
+    now: Date.now(),
+  })
+  return {
+    owner,
+    eventId,
+    itemId,
+    optionId,
+    shareToken: published!.shareToken!,
+    type,
+  }
+}
+
+async function submittedLines(
+  t: Harness,
+  setup: Awaited<ReturnType<typeof event>>,
+  email: string,
+  lines: Array<{ itemId: Id<"items">; quantity: number }>,
+  optionId = setup.optionId
+) {
+  const guest = await user(t, email)
+  await guest.client.mutation(api.eventAttendees.startCheckout, {
+    shareToken: setup.shareToken,
+  })
+  const fulfillment =
+    setup.type === "pickup"
+      ? { optionId, pickupContact: "Ada" }
+      : {
+          optionId,
+          recipientName: "Ada",
+          phoneNumber: "123",
+          address: "12, \"Lace\" Road\nLagos",
+          availability: "=Weekdays after 10",
+          notes: "Call before delivery",
+        }
+  const orderId = await guest.client.mutation(api.checkout.saveDraft, {
+    shareToken: setup.shareToken,
+    lines,
+    fulfillment,
+    guestName: "Ada",
+    guestPhone: "123",
+  })
+  const proofId = await t.run(async (ctx) => {
+    const order = await ctx.db.get(orderId)
+    const storageId = await ctx.storage.store(
+      new Blob(["proof"], { type: "application/pdf" })
+    )
+    return await ctx.db.insert("paymentProofs", {
+      eventId: order!.eventId,
+      attendeeId: order!.attendeeId,
+      orderId,
+      storageId,
+      contentType: "application/pdf",
+      size: 5,
+      sha256: "a".repeat(43) + "=",
+      submittedByUserId: guest.userId,
+      status: "active",
+      createdAt: Date.now(),
+    })
+  })
+  await guest.client.mutation(api.checkout.submit, {
+    shareToken: setup.shareToken,
+    requestId: `submit-${email.replace(/[^A-Za-z0-9_-]/g, "-")}`,
+    lines,
+    fulfillment,
+    proofId,
+    guestName: "Ada",
+    guestPhone: "123",
+  })
+  return { guest, orderId, proofId, fulfillment }
+}
+
+async function submitted(
+  t: Harness,
+  setup: Awaited<ReturnType<typeof event>>,
+  email: string,
+  itemId = setup.itemId,
+  optionId = setup.optionId
+) {
+  return await submittedLines(t, setup, email, [{ itemId, quantity: 1 }], optionId)
+}
+
+async function confirm(
+  t: Harness,
+  setup: Awaited<ReturnType<typeof event>>,
+  orderId: Id<"orders">
+) {
+  await setup.owner.client.mutation(api.organizerOrders.decidePayment, {
+    eventId: setup.eventId,
+    orderId,
+    decision: "confirmed",
+  })
+}
+
+describe("organizer orders", () => {
+  it("denies anonymous and cross-owner summary, list, detail, decisions, progress, cancellation, exports, backfill, and notification history", async () => {
+    const t = test()
+    const setup = await event(t)
+    const order = await submitted(t, setup, "guest@example.com")
+    const other = await user(t, "other@example.com")
+    const anonymous = t.withIdentity({})
+    await expect(
+      anonymous.query(api.organizerOrders.getSummary, {
+        eventId: setup.eventId,
+      })
+    ).rejects.toThrow()
+    await expect(
+      other.client.query(api.organizerOrders.list, {
+        eventId: setup.eventId,
+        paginationOpts: { cursor: null, numItems: 10 },
+      })
+    ).rejects.toThrow()
+    await expect(
+      other.client.query(api.organizerOrders.getDetail, {
+        eventId: setup.eventId,
+        orderId: order.orderId,
+      })
+    ).rejects.toThrow()
+    await expect(
+      other.client.mutation(api.organizerOrders.decidePayment, {
+        eventId: setup.eventId,
+        orderId: order.orderId,
+        decision: "confirmed",
+      })
+    ).rejects.toThrow()
+    await expect(
+      other.client.mutation(api.organizerOrders.advanceFulfillment, {
+        eventId: setup.eventId,
+        orderId: order.orderId,
+      })
+    ).rejects.toThrow()
+    await expect(
+      other.client.mutation(api.organizerOrders.cancel, {
+        eventId: setup.eventId,
+        orderId: order.orderId,
+      })
+    ).rejects.toThrow()
+    await expect(
+      other.client.query(api.notifications.listOrderHistory, {
+        eventId: setup.eventId,
+        orderId: order.orderId,
+        paginationOpts: { cursor: null, numItems: 10 },
+      })
+    ).rejects.toThrow()
+    await expect(
+      t.query(internal.organizerOrders.getExportPage, {
+        eventId: setup.eventId,
+        cursor: null,
+      })
+    ).rejects.toThrow()
+  })
+
+  it("enforces payment transitions, exact-once release, resubmission, aggregates, and immutable organizer history", async () => {
+    const t = test()
+    const setup = await event(t)
+    const order = await submitted(t, setup, "reject@example.com")
+    await setup.owner.client.mutation(api.organizerOrders.decidePayment, {
+      eventId: setup.eventId,
+      orderId: order.orderId,
+      decision: "rejected",
+      note: "Unreadable",
+    })
+    await expect(
+      setup.owner.client.mutation(api.organizerOrders.decidePayment, {
+        eventId: setup.eventId,
+        orderId: order.orderId,
+        decision: "confirmed",
+      })
+    ).rejects.toThrow()
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(setup.itemId))!.reservedQuantity).toBe(0)
+    })
+    const replacement = await t.run(async (ctx) => {
+      const stored = await ctx.db.get(order.orderId)
+      const storageId = await ctx.storage.store(new Blob(["new"]))
+      return await ctx.db.insert("paymentProofs", {
+        eventId: setup.eventId,
+        attendeeId: stored!.attendeeId,
+        orderId: order.orderId,
+        storageId,
+        contentType: "application/pdf",
+        size: 3,
+        sha256: "b".repeat(43) + "=",
+        submittedByUserId: order.guest.userId,
+        status: "active",
+        createdAt: Date.now(),
+      })
+    })
+    await order.guest.client.mutation(api.checkout.resubmitRejected, {
+      shareToken: setup.shareToken,
+      requestId: "resubmit-001",
+      lines: [{ itemId: setup.itemId, quantity: 1 }],
+      fulfillment: { optionId: setup.optionId, pickupContact: "Ada" },
+      proofId: replacement,
+      guestName: "Ada",
+      guestPhone: "123",
+    })
+    const cancelled = await submitted(t, setup, "cancelled@example.com")
+    await setup.owner.client.mutation(api.organizerOrders.cancel, {
+      eventId: setup.eventId,
+      orderId: cancelled.orderId,
+    })
+    const summary = await setup.owner.client.query(
+      api.organizerOrders.getSummary,
+      { eventId: setup.eventId }
+    )
+    expect(summary).toMatchObject({
+      submittedOrderCount: 1,
+      paymentsNeedingReview: 1,
+      currentOrderValueMinor: 1100,
+    })
+    expect(summary.paymentBreakdown).toMatchObject({
+      not_submitted: 0,
+      pending_review: 1,
+      confirmed: 0,
+      rejected: 0,
+    })
+    expect(summary.progressBreakdown).toMatchObject({
+      pending: 1,
+      preparing: 0,
+      ready_for_pickup: 0,
+      dispatched: 0,
+      fulfilled: 0,
+      cancelled: 1,
+    })
+    expect(
+      (
+        await setup.owner.client.query(api.organizerOrders.getDetail, {
+          eventId: setup.eventId,
+          orderId: order.orderId,
+        })
+      )!.eventTimeZone
+    ).toBe("Africa/Lagos")
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(setup.itemId))!.reservedQuantity).toBe(1)
+      const history = await ctx.db
+        .query("orderStatusHistory")
+        .withIndex("by_orderId_and_createdAt", (q) =>
+          q.eq("orderId", order.orderId)
+        )
+        .collect()
+      expect(
+        history.every(
+          (entry) => entry.actorUserId && entry.actorRole && entry.createdAt
+        )
+      ).toBe(true)
+      expect(history.some((entry) => entry.paymentStatus === "rejected")).toBe(
+        true
+      )
+    })
+  })
+
+  it("allows only the pickup and delivery fulfillment transition matrices and rejects terminal/cancelled transitions", async () => {
+    const t = test()
+    const pickup = await event(t, "pickup")
+    const p = await submitted(t, pickup, "pickup@example.com")
+    await confirm(t, pickup, p.orderId)
+    for (const progress of ["preparing", "ready_for_pickup", "fulfilled"]) {
+      await pickup.owner.client.mutation(
+        api.organizerOrders.advanceFulfillment,
+        { eventId: pickup.eventId, orderId: p.orderId }
+      )
+      expect(
+        (await pickup.owner.client.query(api.organizerOrders.getDetail, {
+          eventId: pickup.eventId,
+          orderId: p.orderId,
+        }))!.order.progress
+      ).toBe(progress)
+    }
+    await expect(
+      pickup.owner.client.mutation(api.organizerOrders.advanceFulfillment, {
+        eventId: pickup.eventId,
+        orderId: p.orderId,
+      })
+    ).rejects.toThrow()
+    await expect(
+      pickup.owner.client.mutation(api.organizerOrders.cancel, {
+        eventId: pickup.eventId,
+        orderId: p.orderId,
+      })
+    ).rejects.toThrow()
+    const delivery = await event(t, "delivery")
+    const d = await submitted(t, delivery, "delivery@example.com")
+    await confirm(t, delivery, d.orderId)
+    for (const progress of ["preparing", "dispatched", "fulfilled"]) {
+      await delivery.owner.client.mutation(
+        api.organizerOrders.advanceFulfillment,
+        { eventId: delivery.eventId, orderId: d.orderId }
+      )
+      expect(
+        (await delivery.owner.client.query(api.organizerOrders.getDetail, {
+          eventId: delivery.eventId,
+          orderId: d.orderId,
+        }))!.order.progress
+      ).toBe(progress)
+    }
+  })
+
+  it("stores a trimmed optional payment note and leaves an empty note out of history", async () => {
+    const t = test()
+    const setup = await event(t)
+    const noted = await submitted(t, setup, "noted@example.com")
+    await setup.owner.client.mutation(api.organizerOrders.decidePayment, {
+      eventId: setup.eventId,
+      orderId: noted.orderId,
+      decision: "confirmed",
+      note: "  Receipt checked by Ada.  ",
+    })
+    const blank = await submitted(t, setup, "blank-note@example.com")
+    await setup.owner.client.mutation(api.organizerOrders.decidePayment, {
+      eventId: setup.eventId,
+      orderId: blank.orderId,
+      decision: "confirmed",
+      note: "   ",
+    })
+    await t.run(async (ctx) => {
+      const notedHistory = await ctx.db
+        .query("orderStatusHistory")
+        .withIndex("by_orderId_and_createdAt", (q) =>
+          q.eq("orderId", noted.orderId)
+        )
+        .collect()
+      const blankHistory = await ctx.db
+        .query("orderStatusHistory")
+        .withIndex("by_orderId_and_createdAt", (q) =>
+          q.eq("orderId", blank.orderId)
+        )
+        .collect()
+      expect(
+        notedHistory.find((entry) => entry.paymentStatus === "confirmed")?.note
+      ).toBe("Receipt checked by Ada.")
+      expect(
+        blankHistory.find((entry) => entry.paymentStatus === "confirmed")?.note
+      ).toBeUndefined()
+    })
+  })
+
+  it("exports every captured line and fulfillment details after an item filter selects an order", async () => {
+    const t = test()
+    const setup = await event(t, "delivery")
+    const geleId = await setup.owner.client.mutation(api.items.create, {
+      eventId: setup.eventId,
+      name: "Gele, \"special\"",
+      unitLabel: "piece",
+      priceMinor: 2000,
+      inventoryTotal: 10,
+    })
+    const multiLine = await submittedLines(t, setup, "multi@example.com", [
+      { itemId: setup.itemId, quantity: 1 },
+      { itemId: geleId, quantity: 1 },
+    ])
+    const listed = await setup.owner.client.query(api.organizerOrders.list, {
+      eventId: setup.eventId,
+      itemId: setup.itemId,
+      paginationOpts: { cursor: null, numItems: 20 },
+    })
+    expect(listed.page.map((order) => order._id)).toEqual([multiLine.orderId])
+    const exported = await setup.owner.client.query(
+      internal.organizerOrders.getExportPage,
+      { eventId: setup.eventId, itemId: setup.itemId, cursor: null }
+    )
+    expect(
+      exported.rows
+        .filter((row) => row.reference === listed.page[0]!.reference)
+        .map((row) => row.item)
+        .sort()
+    ).toEqual(['Gele, "special"', "Lace"])
+    expect(
+      exported.rows.filter(
+        (row) => row.reference === listed.page[0]!.reference
+      )
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fulfillmentInstructions: "Bring ID",
+          pickupContact: "",
+          deliveryRecipientName: "Ada",
+          deliveryPhoneNumber: "123",
+          deliveryAddress: '12, "Lace" Road\nLagos',
+          deliveryAvailability: "=Weekdays after 10",
+          deliveryNotes: "Call before delivery",
+        }),
+      ])
+    )
+  })
+
+  it("keeps lifecycle email attention event-scoped and separate from invitation email attention", async () => {
+    const t = test()
+    const setup = await event(t)
+    const other = await event(t, "pickup", "other")
+    const order = await submitted(t, setup, "lifecycle@example.com")
+    const lifecycle = await t.mutation(internal.notifications.enqueueInternal, {
+      dedupeKey: `lifecycle:${order.orderId}`,
+      recipient: "delivered+asoebi-test@resend.dev",
+      ownerId: (await t.run((ctx) => ctx.db.get(setup.eventId)))!.ownerId,
+      eventId: setup.eventId,
+      eventRef: `${setup.eventId}`,
+      orderRef: `${order.orderId}`,
+      template: {
+        kind: "payment_confirmed",
+        recipientName: "Ada",
+        eventName: "Event",
+        orderReference: "ORDER-1",
+        actionUrl: "http://localhost:3000/orders/order",
+      },
+    })
+    await t.mutation(internal.notifications.markAttemptFailed, {
+      notificationId: lifecycle,
+      attemptNumber: 1,
+      error: "Temporary provider failure",
+    })
+    const invitation = await setup.owner.client.mutation(api.eventInvitations.add, {
+      eventId: setup.eventId,
+      name: "Invitation guest",
+      email: "invitation@example.com",
+    })
+    await setup.owner.client.mutation(api.eventInvitations.send, {
+      eventId: setup.eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-lifecycle-attention",
+    })
+    const invitationNotificationId = await t.run(async (ctx) =>
+      (await ctx.db.get(invitation._id))!.currentNotificationId
+    )
+    await t.mutation(internal.notifications.markAttemptFailed, {
+      notificationId: invitationNotificationId!,
+      attemptNumber: 1,
+      error: "Invitation delivery failed",
+    })
+    const failed = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(failed.lifecycleEmail).toMatchObject({ failed: 1, scheduled: 0 })
+    expect(failed.lifecycleEmailNeedsAttention).toBe(1)
+    expect(failed.invitations.needsAttention).toBe(1)
+    expect(failed.needsAttention).toBe(
+        failed.paymentsNeedingReview +
+        failed.confirmedAwaitingPreparation +
+        failed.invitations.needsAttention +
+        failed.lifecycleEmailNeedsAttention
+    )
+    expect(
+      (await other.owner.client.query(api.organizerOrders.getSummary, {
+        eventId: other.eventId,
+      })).lifecycleEmailNeedsAttention
+    ).toBe(0)
+    await t.mutation(internal.notifications.retryInternal, {
+      notificationId: lifecycle,
+    })
+    const retried = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(retried.lifecycleEmail).toMatchObject({ scheduled: 1, failed: 0 })
+    expect(retried.lifecycleEmailNeedsAttention).toBe(0)
+  })
+
+  it("projects lifecycle email status changes, including initial suppression and provider outcomes", async () => {
+    const t = test()
+    const setup = await event(t)
+    const order = await submitted(t, setup, "status-lifecycle@example.com")
+    const ownerId = (await t.run((ctx) => ctx.db.get(setup.eventId)))!.ownerId
+    const makeLifecycle = async (suffix: string, recipient: string) =>
+      await t.mutation(internal.notifications.enqueueInternal, {
+        dedupeKey: `lifecycle-status:${suffix}:${order.orderId}`,
+        recipient,
+        ownerId,
+        eventId: setup.eventId,
+        eventRef: `${setup.eventId}`,
+        orderRef: `${order.orderId}`,
+        template: {
+          kind: "organizer_new_order",
+          recipientName: "Ada",
+          guestName: "Ada",
+          eventName: "Event",
+          orderReference: "ORDER-2",
+          actionUrl: "http://localhost:3000/orders/order",
+        },
+      })
+    const notificationId = await makeLifecycle(
+      "provider",
+      "delivered+asoebi-test@resend.dev"
+    )
+    const componentEmailId = await t.mutation(
+      internal.notifications.enqueueRendered,
+      {
+        notificationId,
+        attemptNumber: 1,
+        to: "delivered+asoebi-test@resend.dev",
+        html: "<p>Order update</p>",
+        text: "Order update",
+      }
+    )
+    let summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.queued).toBe(1)
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId,
+      attemptNumber: 1,
+      componentEmailId,
+      status: "sent",
+      permanent: false,
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.sent).toBe(1)
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId,
+      attemptNumber: 1,
+      componentEmailId,
+      status: "delivered",
+      permanent: false,
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail).toMatchObject({ sent: 0, delivered: 1 })
+    const delayedId = await makeLifecycle(
+      "delayed",
+      "delivered+asoebi-test@resend.dev"
+    )
+    const delayedComponentId = await t.mutation(
+      internal.notifications.enqueueRendered,
+      {
+        notificationId: delayedId,
+        attemptNumber: 1,
+        to: "delivered+asoebi-test@resend.dev",
+        html: "<p>Order update</p>",
+        text: "Order update",
+      }
+    )
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId: delayedId,
+      attemptNumber: 1,
+      componentEmailId: delayedComponentId,
+      status: "delayed",
+      permanent: false,
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.delayed).toBe(1)
+    expect(summary.lifecycleEmailNeedsAttention).toBe(1)
+    await t.mutation(internal.notifications.retryInternal, {
+      notificationId: delayedId,
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail).toMatchObject({ delayed: 0, scheduled: 1 })
+
+    const providerFailedId = await makeLifecycle(
+      "provider-failed",
+      "delivered+asoebi-test@resend.dev"
+    )
+    const failedComponentId = await t.mutation(
+      internal.notifications.enqueueRendered,
+      {
+        notificationId: providerFailedId,
+        attemptNumber: 1,
+        to: "delivered+asoebi-test@resend.dev",
+        html: "<p>Order update</p>",
+        text: "Order update",
+      }
+    )
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId: providerFailedId,
+      attemptNumber: 1,
+      componentEmailId: failedComponentId,
+      status: "failed",
+      permanent: false,
+      reason: "Provider API retries were exhausted",
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.failed).toBe(1)
+
+    const permanentId = await makeLifecycle(
+      "permanent",
+      "delivered+asoebi-test@resend.dev"
+    )
+    const permanentComponentId = await t.mutation(
+      internal.notifications.enqueueRendered,
+      {
+        notificationId: permanentId,
+        attemptNumber: 1,
+        to: "delivered+asoebi-test@resend.dev",
+        html: "<p>Order update</p>",
+        text: "Order update",
+      }
+    )
+    await t.mutation(internal.notifications.reconcileComponentStatus, {
+      notificationId: permanentId,
+      attemptNumber: 1,
+      componentEmailId: permanentComponentId,
+      status: "bounced",
+      permanent: true,
+      reason: "Mailbox unavailable",
+    })
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.bounced).toBe(1)
+    expect(summary.lifecycleEmailNeedsAttention).toBe(2)
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("notifications", {
+        dedupeKey: "recipient-suppressed",
+        recipient: "suppressed@example.com",
+        subject: "Previous delivery",
+        templateKind: "verify_email",
+        status: "suppressed",
+        latestAttemptNumber: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    })
+    await makeLifecycle("initial-suppression", "suppressed@example.com")
+    summary = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(summary.lifecycleEmail.suppressed).toBe(1)
+  })
+
+  it("backfills legacy lifecycle email projections without counting invitation email", async () => {
+    const t = test()
+    const setup = await event(t)
+    const order = await submitted(t, setup, "legacy@example.com")
+    const legacyId = await t.run(async (ctx) =>
+      await ctx.db.insert("notifications", {
+        dedupeKey: `legacy:${order.orderId}`,
+        recipient: "legacy@example.com",
+        subject: "Payment confirmed",
+        templateKind: "payment_confirmed",
+        ownerId: (await ctx.db.get(setup.eventId))!.ownerId,
+        eventRef: `${setup.eventId}`,
+        orderRef: `${order.orderId}`,
+        status: "failed",
+        latestAttemptNumber: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    )
+    await t.run(async (ctx) => {
+      await ctx.db.insert("notifications", {
+        dedupeKey: "malformed-legacy-order-reference",
+        recipient: "malformed@example.com",
+        subject: "Payment confirmed",
+        templateKind: "payment_confirmed",
+        eventRef: `${setup.eventId}`,
+        orderRef: "not-an-order-id",
+        status: "failed",
+        latestAttemptNumber: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    })
+    await t.mutation(internal.lifecycleEmailAggregateBackfill.backfillPage, {
+      cursor: null,
+    })
+    const once = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(once.lifecycleEmail.failed).toBe(1)
+    await t.mutation(internal.lifecycleEmailAggregateBackfill.backfillPage, {
+      cursor: null,
+    })
+    const twice = await setup.owner.client.query(api.organizerOrders.getSummary, {
+      eventId: setup.eventId,
+    })
+    expect(twice.lifecycleEmail.failed).toBe(1)
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(legacyId))!.eventId).toEqual(setup.eventId)
+    })
+  })
+
+  it("returns bounded sparse pages for combined filters and resumes list/export", async () => {
+    const t = test()
+    const setup = await event(t)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(setup.itemId, { inventoryTotal: 40 })
+    })
+    const selectedOption = await setup.owner.client.mutation(
+      api.eventSetup.createFulfillmentOption,
+      {
+        eventId: setup.eventId,
+        name: "Selected pickup",
+        type: "pickup",
+        feeMinor: 100,
+        instructions: "Bring ID",
+        enabled: true,
+        requiredFields: { kind: "pickup", pickupContact: true },
+      }
+    )
+    const matching = await submitted(
+      t,
+      setup,
+      "matching-sparse@example.com",
+      setup.itemId,
+      selectedOption
+    )
+    for (let index = 0; index < 26; index++)
+      await submitted(t, setup, `sparse-${index}@example.com`)
+    const filters = {
+      eventId: setup.eventId,
+      itemId: setup.itemId,
+      paymentStatus: "pending_review" as const,
+      fulfillmentOptionId: selectedOption,
+    }
+    const first = await setup.owner.client.query(api.organizerOrders.list, {
+      ...filters,
+      paginationOpts: { cursor: null, numItems: 20 },
+    })
+    expect(first.page).toEqual([])
+    expect(first.isDone).toBe(false)
+    const second = await setup.owner.client.query(api.organizerOrders.list, {
+      ...filters,
+      paginationOpts: { cursor: first.continueCursor, numItems: 20 },
+    })
+    expect(second.page.map((order) => order._id)).toEqual([matching.orderId])
+    const firstExport = await setup.owner.client.query(
+      internal.organizerOrders.getExportPage,
+      { ...filters, cursor: null }
+    )
+    expect(firstExport.rows).toEqual([])
+    expect(firstExport.isDone).toBe(false)
+    const secondExport = await setup.owner.client.query(
+      internal.organizerOrders.getExportPage,
+      { ...filters, cursor: firstExport.continueCursor }
+    )
+    expect(secondExport.rows.map((row) => row.reference)).toHaveLength(1)
+    expect(secondExport.rows[0]!.reference).toBe(
+      second.page[0]!.reference
+    )
+  })
+
+  it("uses indexed item candidates and keeps cancelled, not drafts, in paginated list/export parity", async () => {
+    const t = test()
+    const setup = await event(t)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(setup.itemId, { inventoryTotal: 60 })
+    })
+    const otherItem = await setup.owner.client.mutation(api.items.create, {
+      eventId: setup.eventId,
+      name: "Head tie",
+      unitLabel: "piece",
+      priceMinor: 1000,
+      inventoryTotal: 60,
+    })
+    const targetOrders = []
+    for (let index = 0; index < 27; index++)
+      targetOrders.push(
+        await submitted(t, setup, `target-${index}@example.com`)
+      )
+    // These later orders would occupy the first generic event pages. The
+    // item projection must make the selected item available without scanning
+    // those unrelated order lines first.
+    for (let index = 0; index < 27; index++)
+      await submitted(t, setup, `other-${index}@example.com`, otherItem)
+    await setup.owner.client.mutation(api.organizerOrders.cancel, {
+      eventId: setup.eventId,
+      orderId: targetOrders[0]!.orderId,
+    })
+    const draftGuest = await user(t, "draft@example.com")
+    await draftGuest.client.mutation(api.eventAttendees.startCheckout, {
+      shareToken: setup.shareToken,
+    })
+    const draftId = await draftGuest.client.mutation(api.checkout.saveDraft, {
+      shareToken: setup.shareToken,
+      lines: [{ itemId: setup.itemId, quantity: 1 }],
+      fulfillment: { optionId: setup.optionId, pickupContact: "Ada" },
+      guestName: "Ada",
+      guestPhone: "123",
+    })
+    const draftReference = await t.run(
+      async (ctx) => (await ctx.db.get(draftId))!.reference
+    )
+    const listed = await setup.owner.client.query(api.organizerOrders.list, {
+      eventId: setup.eventId,
+      itemId: setup.itemId,
+      paymentStatus: "pending_review",
+      fulfillmentType: "pickup",
+      paginationOpts: { cursor: null, numItems: 20 },
+    })
+    expect(listed.page).toHaveLength(20)
+    expect(listed.continueCursor).toBeTruthy()
+    const second = await setup.owner.client.query(api.organizerOrders.list, {
+      eventId: setup.eventId,
+      itemId: setup.itemId,
+      paymentStatus: "pending_review",
+      fulfillmentType: "pickup",
+      paginationOpts: { cursor: listed.continueCursor, numItems: 20 },
+    })
+    expect(second.page).toHaveLength(7)
+    const cancelled = await setup.owner.client.query(api.organizerOrders.list, {
+      eventId: setup.eventId,
+      progress: "cancelled",
+      paginationOpts: { cursor: null, numItems: 20 },
+    })
+    expect(cancelled.page.map((order) => order._id)).toEqual([
+      targetOrders[0]!.orderId,
+    ])
+    const listedReferences: string[] = []
+    let listCursor: string | null = null
+    for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+      const page: {
+        page: Array<{ reference: string }>
+        isDone: boolean
+        continueCursor: string
+      } = await setup.owner.client.query(api.organizerOrders.list, {
+        eventId: setup.eventId,
+        paginationOpts: { cursor: listCursor, numItems: 20 },
+      })
+      listedReferences.push(...page.page.map((order) => order.reference))
+      if (page.isDone) break
+      listCursor = page.continueCursor
+    }
+    expect(listedReferences).toHaveLength(54)
+    expect(listedReferences).not.toContain(draftReference)
+    expect(new Set(listedReferences)).toHaveLength(54)
+    const exportReferences: string[] = []
+    let exportCursor: string | null = null
+    for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+      const exported: {
+        rows: Array<{ reference: string }>
+        isDone: boolean
+        continueCursor: string
+      } = await setup.owner.client.query(
+        internal.organizerOrders.getExportPage,
+        { eventId: setup.eventId, cursor: exportCursor }
+      )
+      exportReferences.push(...exported.rows.map((row) => row.reference))
+      if (exported.isDone) break
+      exportCursor = exported.continueCursor
+    }
+    expect(new Set(exportReferences)).toEqual(new Set(listedReferences))
+    let cancelledExportCursor: string | null = null
+    const cancelledExportReferences: string[] = []
+    for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+      const exported: {
+        rows: Array<{ reference: string }>
+        isDone: boolean
+        continueCursor: string
+      } = await setup.owner.client.query(
+        internal.organizerOrders.getExportPage,
+        {
+          eventId: setup.eventId,
+          cursor: cancelledExportCursor,
+          progress: "cancelled",
+        }
+      )
+      cancelledExportReferences.push(
+        ...exported.rows.map((row) => row.reference)
+      )
+      if (exported.isDone) break
+      cancelledExportCursor = exported.continueCursor
+    }
+    expect(cancelledExportReferences).toEqual(
+      cancelled.page.map((order) => order.reference)
+    )
+  })
+
+  it("backfills pre-component rows idempotently", async () => {
+    const t = test()
+    const setup = await event(t)
+    await submitted(t, setup, "backfill@example.com")
+    for (const search of ["x".repeat(121), "x".repeat(160)]) {
+      await expect(
+        setup.owner.client.query(api.organizerOrders.list, {
+          eventId: setup.eventId,
+          search,
+          paginationOpts: { cursor: null, numItems: 20 },
+        })
+      ).rejects.toThrow("Search is too long.")
+      await expect(
+        setup.owner.client.query(internal.organizerOrders.getExportPage, {
+          eventId: setup.eventId,
+          cursor: null,
+          search,
+        })
+      ).rejects.toThrow("Search is too long.")
+    }
+    const backfill = await t.mutation(
+      internal.organizerOrderAggregateBackfill.backfillPage,
+      { cursor: null }
+    )
+    expect(backfill.orders).toBeGreaterThan(0)
+    await expect(
+      t.mutation(internal.organizerOrderAggregateBackfill.backfillPage, {
+        cursor: null,
+      })
+    ).resolves.toMatchObject({ orders: backfill.orders })
+  })
+})

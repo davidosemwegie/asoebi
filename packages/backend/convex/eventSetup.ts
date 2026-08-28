@@ -18,6 +18,7 @@ import {
   internalMutation,
   internalQuery,
   mutation,
+  query,
 } from "./_generated/server"
 
 const MAX_OPTION_NAME_LENGTH = 80

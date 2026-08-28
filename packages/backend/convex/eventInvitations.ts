@@ -188,7 +188,7 @@ async function requireSendReceiptCapacity(
     throw new ConvexError("Too many recent send requests for this event.")
 }
 
-async function replaceInvitation(
+export async function replaceInvitation(
   ctx: MutationCtx,
   oldInvitation: Invitation,
   patch: Partial<Omit<Invitation, "_id" | "_creationTime" | "eventId">>
@@ -201,6 +201,37 @@ async function replaceInvitation(
     invitationActivityCounts.replace(ctx, oldInvitation, updated),
   ])
   return updated
+}
+
+/** Keep invitation activity monotonic when an invited guest's order completes.
+ * This helper is called from the organizer fulfillment mutation, so its
+ * aggregate projection changes in the same source mutation as the order. */
+export async function projectOrderCompletion(
+  ctx: MutationCtx,
+  args: { eventId: Id<"events">; email?: string; orderId: Id<"orders"> }
+) {
+  if (!args.email) return null
+  const invitation = await ctx.db
+    .query("eventInvitations")
+    .withIndex("by_eventId_and_normalizedEmail", (q) =>
+      q
+        .eq("eventId", args.eventId)
+        .eq("normalizedEmail", normalizeEmail(args.email!))
+    )
+    .unique()
+  // Completion is strictly the monotonic order_submitted → order_completed
+  // projection for the same captured order; never infer it from an email alone.
+  if (
+    !invitation ||
+    invitation.activity !== "order_submitted" ||
+    invitation.orderId !== `${args.orderId}`
+  )
+    return null
+  return await replaceInvitation(ctx, invitation, {
+    orderId: `${args.orderId}`,
+    activity: "order_completed",
+    updatedAt: Date.now(),
+  })
 }
 
 function importSummary(

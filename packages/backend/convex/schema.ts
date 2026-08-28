@@ -164,6 +164,7 @@ export default defineSchema({
       "lifecycle",
       "updatedAt",
     ])
+    .index("by_eventId_and_updatedAt", ["eventId", "updatedAt"])
     .index("by_eventId_and_paymentStatus_and_updatedAt", [
       "eventId",
       "paymentStatus",
@@ -179,10 +180,45 @@ export default defineSchema({
       "fulfillmentOptionId",
       "updatedAt",
     ])
+    .index("by_eventId_option_payment_updated", [
+      "eventId",
+      "fulfillmentOptionId",
+      "paymentStatus",
+      "updatedAt",
+    ])
+    .index("by_eventId_option_progress_updated", [
+      "eventId",
+      "fulfillmentOptionId",
+      "progress",
+      "updatedAt",
+    ])
+    .index("by_eventId_payment_progress_updated", [
+      "eventId",
+      "paymentStatus",
+      "progress",
+      "updatedAt",
+    ])
     .index("by_eventId_and_fulfillmentOptionId_and_lifecycle", [
       "eventId",
       "fulfillmentOptionId",
       "lifecycle",
+    ])
+    .index("by_eventId_and_fulfillmentType_and_updatedAt", [
+      "eventId",
+      "fulfillmentType",
+      "updatedAt",
+    ])
+    .index("by_eventId_type_payment_updated", [
+      "eventId",
+      "fulfillmentType",
+      "paymentStatus",
+      "updatedAt",
+    ])
+    .index("by_eventId_type_progress_updated", [
+      "eventId",
+      "fulfillmentType",
+      "progress",
+      "updatedAt",
     ])
     .searchIndex("search_eventId_and_text", {
       searchField: "searchText",
@@ -443,10 +479,13 @@ export default defineSchema({
     dedupeKey: v.string(),
     recipient: v.string(),
     subject: v.string(),
-    templateKind: notificationTemplateKind,
-    template: v.optional(notificationTemplate),
-    ownerId: v.optional(v.string()),
-    eventRef: v.optional(v.string()),
+  templateKind: notificationTemplateKind,
+  template: v.optional(notificationTemplate),
+  ownerId: v.optional(v.string()),
+  // A typed event projection keeps lifecycle-email reporting tenant-scoped.
+  // It is optional so previously stored notifications can be backfilled safely.
+  eventId: v.optional(v.id("events")),
+  eventRef: v.optional(v.string()),
     orderRef: v.optional(v.string()),
     invitationRef: v.optional(v.string()),
     status: notificationStatus,
@@ -465,6 +504,11 @@ export default defineSchema({
     .index("by_dedupeKey", ["dedupeKey"])
     .index("by_recipient_and_status", ["recipient", "status", "updatedAt"])
     .index("by_ownerId_and_updatedAt", ["ownerId", "updatedAt"])
+    .index("by_eventId_and_status_and_updatedAt", [
+      "eventId",
+      "status",
+      "updatedAt",
+    ])
     .index("by_eventRef_and_updatedAt", ["eventRef", "updatedAt"])
     .index("by_orderRef_and_updatedAt", ["orderRef", "updatedAt"])
     .index("by_invitationRef_and_updatedAt", ["invitationRef", "updatedAt"])

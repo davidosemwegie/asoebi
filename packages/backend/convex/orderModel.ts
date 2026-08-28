@@ -299,7 +299,7 @@ export async function appendOrderHistory(
     note?: string
   }
 ) {
-  await ctx.db.insert("orderStatusHistory", {
+  return await ctx.db.insert("orderStatusHistory", {
     orderId: args.order._id,
     eventId: args.order.eventId,
     actorUserId: args.actorUserId,

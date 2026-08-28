@@ -1,5 +1,5 @@
-import { EventDetails } from "@/components/event-details"
+import { EventOverview } from "@/components/event-overview"
 
 export default function EventDetailsPage() {
-  return <EventDetails />
+  return <EventOverview />
 }
