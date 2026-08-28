@@ -1,14 +1,61 @@
 import { createClient, type GenericCtx } from "@convex-dev/better-auth"
 import { convex } from "@convex-dev/better-auth/plugins"
+import { requireRunMutationCtx } from "@convex-dev/better-auth/utils"
 import { betterAuth } from "better-auth/minimal"
 import { v } from "convex/values"
 
-import { components } from "./_generated/api"
+import { components, internal } from "./_generated/api"
 import type { DataModel } from "./_generated/dataModel"
 import { env, query } from "./_generated/server"
 import authConfig from "./auth.config"
 
 export const authComponent = createClient<DataModel>(components.betterAuth)
+
+async function tokenDigest(token: string) {
+  const bytes = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(token)
+  )
+  return Array.from(new Uint8Array(bytes), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("")
+}
+
+async function enqueueAuthEmail(
+  ctx: GenericCtx<DataModel>,
+  args: {
+    kind: "verify_email" | "reset_password"
+    user: { id: string; email: string; name: string }
+    url: string
+    token: string
+  }
+) {
+  try {
+    const runCtx = requireRunMutationCtx(ctx)
+    const digest = await tokenDigest(args.token)
+    await runCtx.runMutation(internal.notifications.enqueueInternal, {
+      dedupeKey: `auth:${args.kind}:${digest}`,
+      recipient: args.user.email,
+      ownerId: args.user.id,
+      payloadExpiresAt: Date.now() + 60 * 60 * 1_000,
+      template:
+        args.kind === "reset_password"
+          ? {
+              kind: "reset_password",
+              recipientName: args.user.name,
+              actionUrl: args.url,
+              expiresInMinutes: 60,
+            }
+          : {
+              kind: "verify_email",
+              recipientName: args.user.name,
+              actionUrl: args.url,
+            },
+    })
+  } catch (error) {
+    console.error(`Could not schedule ${args.kind} email`, error)
+  }
+}
 
 export const createAuth = (ctx: GenericCtx<DataModel>) =>
   betterAuth({
@@ -27,9 +74,31 @@ export const createAuth = (ctx: GenericCtx<DataModel>) =>
     },
     secret: env.BETTER_AUTH_SECRET,
     database: authComponent.adapter(ctx),
+    emailVerification: {
+      expiresIn: 60 * 60,
+      sendOnSignUp: true,
+      sendVerificationEmail: async ({ user, url, token }) => {
+        await enqueueAuthEmail(ctx, {
+          kind: "verify_email",
+          user,
+          url,
+          token,
+        })
+      },
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
+      resetPasswordTokenExpiresIn: 60 * 60,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, url, token }) => {
+        await enqueueAuthEmail(ctx, {
+          kind: "reset_password",
+          user,
+          url,
+          token,
+        })
+      },
     },
     advanced: {
       useSecureCookies: !env.SITE_URL.startsWith("http://"),

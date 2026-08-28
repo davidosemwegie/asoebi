@@ -1,0 +1,28 @@
+import { cronJobs } from "convex/server"
+
+import { internal } from "./_generated/api"
+
+const crons = cronJobs()
+
+crons.interval(
+  "clean finalized email bodies",
+  { hours: 24 },
+  internal.emailCleanup.cleanFinalizedBodies
+)
+crons.interval(
+  "clean abandoned email records",
+  { hours: 24 },
+  internal.emailCleanup.cleanAbandonedRecords
+)
+crons.interval(
+  "scrub expired application email payloads",
+  { hours: 24 },
+  internal.emailCleanup.scrubExpiredApplicationPayloads
+)
+crons.interval(
+  "clean unmatched email suppressions",
+  { hours: 24 },
+  internal.emailCleanup.cleanPendingSuppressions
+)
+
+export default crons

@@ -8,6 +8,7 @@
     "allowSyntheticDefaultImports": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
     "isolatedModules": true,
     "skipLibCheck": true,
     "noEmit": true
