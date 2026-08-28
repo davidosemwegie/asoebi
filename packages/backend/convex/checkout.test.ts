@@ -535,6 +535,33 @@ describe("guest checkout", () => {
     ).toBeNull()
   })
 
+  it("returns the current payment status for confirmation-page routing", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const draft = await draftFor(t, event, "confirmation-status@example.com")
+    const orderId = await draft.guest.client.mutation(
+      api.checkout.submit,
+      submitArgs(event, draft.proofId, "confirmation-status-submit")
+    )
+    expect(
+      await draft.guest.client.query(api.orders.getMineForConfirmation, {
+        orderId,
+      })
+    ).toMatchObject({
+      lifecycle: "submitted",
+      paymentStatus: "pending_review",
+      eventShareToken: event.shareToken,
+    })
+    await t.run(async (ctx) => {
+      await ctx.db.patch(orderId, { paymentStatus: "confirmed" })
+    })
+    expect(
+      await draft.guest.client.query(api.orders.getMineForConfirmation, {
+        orderId,
+      })
+    ).toMatchObject({ paymentStatus: "confirmed" })
+  })
+
   it("does not delete an option when a cancelled order precedes an active one", async () => {
     const t = test()
     const event = await readyEvent(t)

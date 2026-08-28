@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  canShowOrderConfirmation,
   canGuestCancelOrder,
   earliestIncompleteStep,
   missingRequiredFulfillmentFields,
@@ -103,6 +104,33 @@ describe("guest order step guards", () => {
         lifecycle: "submitted",
         paymentStatus: "pending_review",
         orderingOpen: false,
+      })
+    ).toBe(false)
+  })
+
+  it("shows the submission confirmation only while payment awaits review", () => {
+    expect(
+      canShowOrderConfirmation({
+        lifecycle: "submitted",
+        paymentStatus: "pending_review",
+      })
+    ).toBe(true)
+    expect(
+      canShowOrderConfirmation({
+        lifecycle: "submitted",
+        paymentStatus: "confirmed",
+      })
+    ).toBe(false)
+    expect(
+      canShowOrderConfirmation({
+        lifecycle: "submitted",
+        paymentStatus: "rejected",
+      })
+    ).toBe(false)
+    expect(
+      canShowOrderConfirmation({
+        lifecycle: "draft",
+        paymentStatus: "not_submitted",
       })
     ).toBe(false)
   })

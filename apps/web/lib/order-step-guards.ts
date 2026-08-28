@@ -104,6 +104,14 @@ export function canGuestCancelOrder({
   )
 }
 
+export function canShowOrderConfirmation(
+  order: { lifecycle: string; paymentStatus: string } | null | undefined
+) {
+  return (
+    order?.lifecycle === "submitted" && order.paymentStatus === "pending_review"
+  )
+}
+
 export function earliestIncompleteStep(order: {
   lines: Array<unknown>
   hasQuantityExceedingAvailability?: boolean

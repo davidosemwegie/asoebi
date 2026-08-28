@@ -162,6 +162,7 @@ export const getMineForConfirmation = query({
   returns: v.union(
     v.object({
       lifecycle: orderLifecycle,
+      paymentStatus,
       eventShareToken: v.union(v.string(), v.null()),
     }),
     v.null()
@@ -175,6 +176,7 @@ export const getMineForConfirmation = query({
     const event = await ctx.db.get(order.eventId)
     return {
       lifecycle: order.lifecycle,
+      paymentStatus: order.paymentStatus,
       eventShareToken: event?.shareToken ?? null,
     }
   },
