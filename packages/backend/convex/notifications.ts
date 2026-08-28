@@ -484,14 +484,7 @@ export const retryMine = mutation({
       throw new ConvexError("Notification not found.")
     }
     if (notification.invitationRef) {
-      const invitation = await ctx.db
-        .query("eventInvitations")
-        .withIndex("by_currentNotificationId", (q) =>
-          q.eq("currentNotificationId", notificationId)
-        )
-        .unique()
-      if (!invitation)
-        throw new ConvexError("This notification is not eligible for retry.")
+      throw new ConvexError("Retry guest invitations from the guest list.")
     }
     const attemptNumber = await retryNotification(ctx, notification)
     await ctx.runMutation(

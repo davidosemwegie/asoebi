@@ -118,6 +118,23 @@ async function deliveryCount(t: Test, eventId: Id<"events">, state: string) {
   )
 }
 
+async function deliveryAttemptCount(
+  t: Test,
+  notificationId: Id<"notifications">
+) {
+  return await t.run(
+    async (ctx) =>
+      (
+        await ctx.db
+          .query("notificationDeliveries")
+          .withIndex("by_notificationId_and_attemptNumber", (q) =>
+            q.eq("notificationId", notificationId)
+          )
+          .take(10)
+      ).length
+  )
+}
+
 describe("event invitations", () => {
   it("denies anonymous and cross-owner access", async () => {
     const t = createTest()
@@ -485,6 +502,36 @@ describe("event invitations", () => {
     ).rejects.toThrow("Publish the event")
   })
 
+  it("rejects generic retry for a current invitation after the event closes", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    await publishForSending(t, eventId)
+    const invitation = await client.mutation(api.eventInvitations.add, {
+      eventId,
+      name: "Guest",
+      email: "guest@example.com",
+    })
+    await client.mutation(api.eventInvitations.send, {
+      eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-0025-generic",
+    })
+    const current = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    const notificationId = current!.currentNotificationId!
+    await t.run(async (ctx) => {
+      await ctx.db.patch(notificationId, { status: "failed" })
+      await ctx.db.patch(eventId, { status: "closed" })
+    })
+    const beforeAttempts = await deliveryAttemptCount(t, notificationId)
+
+    await expect(
+      client.mutation(api.notifications.retryMine, { notificationId })
+    ).rejects.toThrow("guest list")
+
+    expect(await deliveryAttemptCount(t, notificationId)).toBe(beforeAttempts)
+  })
+
   it("does not send or retry invitations after the ordering deadline", async () => {
     const t = createTest()
     const { client } = await createUser(t, "owner@example.com")
@@ -529,6 +576,36 @@ describe("event invitations", () => {
         requestId: "retry-0026",
       })
     ).rejects.toThrow("ordering deadline")
+  })
+
+  it("rejects generic retry for a current invitation after the ordering deadline", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    await publishForSending(t, eventId)
+    const invitation = await client.mutation(api.eventInvitations.add, {
+      eventId,
+      name: "Guest",
+      email: "guest@example.com",
+    })
+    await client.mutation(api.eventInvitations.send, {
+      eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-0026-generic",
+    })
+    const current = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    const notificationId = current!.currentNotificationId!
+    await t.run(async (ctx) => {
+      await ctx.db.patch(notificationId, { status: "failed" })
+      await ctx.db.patch(eventId, { orderDeadlineAt: Date.now() - 1 })
+    })
+    const beforeAttempts = await deliveryAttemptCount(t, notificationId)
+
+    await expect(
+      client.mutation(api.notifications.retryMine, { notificationId })
+    ).rejects.toThrow("guest list")
+
+    expect(await deliveryAttemptCount(t, notificationId)).toBe(beforeAttempts)
   })
 
   it("ignores an older logical notification when projecting a late provider update", async () => {
