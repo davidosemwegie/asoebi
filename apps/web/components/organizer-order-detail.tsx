@@ -7,6 +7,7 @@ import { LoaderCircleIcon } from "lucide-react"
 
 import { useEventWorkspace } from "@/components/event-workspace"
 import { formatMoney } from "@/lib/money"
+import { canOrganizerCancelOrder } from "@/lib/organizer-order-actions"
 import { optionalPaymentDecisionNote } from "@/lib/organizer-payment-note"
 import { paymentStatusLabel, progressStatusLabel } from "@/lib/order-status"
 import { api } from "@workspace/backend/convex/_generated/api"
@@ -139,9 +140,9 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
     return <p className="text-base">This order is not available.</p>
   const { order } = detail
   const normalizedPaymentNote = optionalPaymentDecisionNote(paymentNote)
+  const canCancelOrder = canOrganizerCancelOrder(order)
   const action =
-    order.lifecycle === "submitted" &&
-    order.paymentStatus === "pending_review" ? (
+    canCancelOrder && order.paymentStatus === "pending_review" ? (
       <div className="grid gap-3">
         <div className="grid gap-2">
           <Label htmlFor="payment-decision-note" className="text-base">
@@ -183,9 +184,7 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
           </Button>
         </div>
       </div>
-    ) : order.lifecycle === "submitted" &&
-      order.paymentStatus === "confirmed" &&
-      order.progress !== "fulfilled" ? (
+    ) : canCancelOrder && order.paymentStatus === "confirmed" ? (
       <Button
         className="min-h-12"
         disabled={isMutating}
@@ -194,17 +193,6 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
         }
       >
         Move to next step
-      </Button>
-    ) : order.lifecycle === "submitted" &&
-      order.progress !== "fulfilled" &&
-      order.progress !== "cancelled" ? (
-      <Button
-        variant="destructive"
-        className="min-h-12"
-        disabled={isMutating}
-        onClick={() => setConfirmation("cancel")}
-      >
-        Cancel order
       </Button>
     ) : null
   const history = [...historyPages, ...(historyResult?.page ?? detail.history)]
@@ -422,7 +410,52 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
           ) : null}
         </CardContent>
       </Card>
-      {action}
+      {action ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Next action</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-base">
+            {action}
+            {canCancelOrder ? (
+              <div className="border-t pt-4">
+                <p className="mb-3">
+                  Need to stop this order? Cancelling releases any items set
+                  aside for it and cannot be undone.
+                </p>
+                <Button
+                  variant="destructive"
+                  className="min-h-12"
+                  disabled={isMutating}
+                  onClick={() => setConfirmation("cancel")}
+                >
+                  Cancel order
+                </Button>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : canCancelOrder ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Order actions</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-base">
+            <p>
+              Need to stop this order? Cancelling releases any items set aside
+              for it and cannot be undone.
+            </p>
+            <Button
+              variant="destructive"
+              className="min-h-12"
+              disabled={isMutating}
+              onClick={() => setConfirmation("cancel")}
+            >
+              Cancel order
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
       <AlertDialog
         open={confirmation !== null}
         onOpenChange={(open) => {
