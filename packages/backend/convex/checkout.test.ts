@@ -5,6 +5,7 @@ import { convexTest } from "convex-test"
 import { beforeAll, describe, expect, it, vi } from "vitest"
 
 import { api, components } from "./_generated/api"
+import type { Id } from "./_generated/dataModel"
 import schema from "./schema"
 
 const modules = import.meta.glob("./**/*.ts")
@@ -102,7 +103,65 @@ async function readyEvent(t: ReturnType<typeof test>) {
     eventId,
     now: Date.now(),
   })
-  return { itemId, optionId, shareToken: event!.shareToken! }
+  return { itemId, optionId, shareToken: event!.shareToken!, owner }
+}
+
+async function proofFor(
+  t: ReturnType<typeof test>,
+  orderId: Id<"orders">,
+  userId: string
+) {
+  return await t.run(async (ctx) => {
+    const order = await ctx.db.get(orderId)
+    if (!order) throw new Error("missing order")
+    const storageId = await ctx.storage.store(
+      new Blob(["%PDF-1.4\n%%EOF"], { type: "application/pdf" })
+    )
+    return await ctx.db.insert("paymentProofs", {
+      eventId: order.eventId,
+      attendeeId: order.attendeeId,
+      storageId,
+      contentType: "application/pdf",
+      size: 8,
+      sha256: "a".repeat(43) + "=",
+      submittedByUserId: userId,
+      status: "active",
+      createdAt: Date.now(),
+    })
+  })
+}
+
+async function draftFor(
+  t: ReturnType<typeof test>,
+  event: Awaited<ReturnType<typeof readyEvent>>,
+  email: string
+) {
+  const guest = await user(t, email)
+  await guest.client.mutation(api.eventAttendees.startCheckout, {
+    shareToken: event.shareToken,
+  })
+  const orderId = await guest.client.mutation(api.checkout.saveDraft, {
+    shareToken: event.shareToken,
+    lines: [{ itemId: event.itemId, quantity: 1 }],
+    fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+    guestName: "Ada",
+  })
+  return { guest, orderId, proofId: await proofFor(t, orderId, guest.userId) }
+}
+
+function submitArgs(
+  event: Awaited<ReturnType<typeof readyEvent>>,
+  proofId: string,
+  requestId: string
+) {
+  return {
+    shareToken: event.shareToken,
+    requestId,
+    lines: [{ itemId: event.itemId, quantity: 1 }],
+    fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+    proofId: proofId as never,
+    guestName: "Ada",
+  }
 }
 
 describe("guest checkout", () => {
@@ -216,5 +275,156 @@ describe("guest checkout", () => {
       expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(1)
       expect((await ctx.db.get(first))!.lifecycle).toBe("submitted")
     })
+  })
+
+  it("allows only one concurrent final-unit submission", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const first = await draftFor(t, event, "first@example.com")
+    const second = await draftFor(t, event, "second@example.com")
+    const results = await Promise.allSettled([
+      first.guest.client.mutation(
+        api.checkout.submit,
+        submitArgs(event, first.proofId, "concurrent-first")
+      ),
+      second.guest.client.mutation(
+        api.checkout.submit,
+        submitArgs(event, second.proofId, "concurrent-second")
+      ),
+    ])
+    expect(
+      results.filter((result) => result.status === "fulfilled")
+    ).toHaveLength(1)
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(1)
+    })
+  })
+
+  it("keeps one active order, then clears the pointer and releases exactly once on cancellation", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const draft = await draftFor(t, event, "cancel@example.com")
+    const orderId = await draft.guest.client.mutation(
+      api.checkout.submit,
+      submitArgs(event, draft.proofId, "submit-cancel-1")
+    )
+    await expect(
+      draft.guest.client.mutation(
+        api.checkout.submit,
+        submitArgs(event, draft.proofId, "submit-cancel-2")
+      )
+    ).rejects.toThrow("active order")
+    const cancelled = await draft.guest.client.mutation(
+      api.checkout.cancelMine,
+      {
+        shareToken: event.shareToken,
+        requestId: "cancel-order-1",
+      }
+    )
+    expect(cancelled).toBe(orderId)
+    expect(
+      await draft.guest.client.mutation(api.checkout.cancelMine, {
+        shareToken: event.shareToken,
+        requestId: "cancel-order-1",
+      })
+    ).toBe(orderId)
+    const replacement = await draft.guest.client.mutation(
+      api.checkout.saveDraft,
+      {
+        shareToken: event.shareToken,
+        lines: [{ itemId: event.itemId, quantity: 1 }],
+      }
+    )
+    expect(replacement).not.toBe(orderId)
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(0)
+      const cancelledOrder = await ctx.db.get(orderId)
+      expect(cancelledOrder!.reservationState).toBe("released")
+      const attendee = await ctx.db.get(cancelledOrder!.attendeeId)
+      expect(attendee!.activeOrderId).toBe(replacement)
+      const history = await ctx.db
+        .query("orderStatusHistory")
+        .withIndex("by_orderId_and_createdAt", (q) => q.eq("orderId", orderId))
+        .take(10)
+      expect(history.some((entry) => entry.lifecycle === "cancelled")).toBe(
+        true
+      )
+      const lines = await ctx.db
+        .query("orderLines")
+        .withIndex("by_orderId", (q) => q.eq("orderId", orderId))
+        .take(10)
+      expect(lines.every((line) => line.lifecycle === "cancelled")).toBe(true)
+    })
+  })
+
+  it("requires a replacement proof only when a pending edit changes its total", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const draft = await draftFor(t, event, "update@example.com")
+    const orderId = await draft.guest.client.mutation(
+      api.checkout.submit,
+      submitArgs(event, draft.proofId, "submit-update-1")
+    )
+    await expect(
+      draft.guest.client.mutation(api.checkout.updatePending, {
+        ...submitArgs(event, draft.proofId, "update-same-total"),
+      })
+    ).resolves.toBe(orderId)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.itemId, { priceMinor: 99_999 })
+    })
+    await expect(
+      draft.guest.client.mutation(api.checkout.updatePending, {
+        ...submitArgs(event, draft.proofId, "update-changed-total"),
+        lines: [{ itemId: event.itemId, quantity: 1 }],
+      })
+    ).resolves.toBe(orderId)
+    await expect(
+      draft.guest.client.mutation(api.checkout.updatePending, {
+        ...submitArgs(event, draft.proofId, "update-new-line-requires-proof"),
+        lines: [{ itemId: event.itemId, quantity: 2 }],
+      })
+    ).rejects.toThrow("new payment receipt")
+  })
+
+  it("returns null for malformed and cross-user confirmation lookups", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const draft = await draftFor(t, event, "confirm@example.com")
+    const other = await user(t, "other@example.com")
+    expect(
+      await draft.guest.client.query(api.orders.getMineForConfirmation, {
+        orderId: "not-an-order-id",
+      })
+    ).toBeNull()
+    expect(
+      await other.client.query(api.orders.getMineForConfirmation, {
+        orderId: draft.orderId,
+      })
+    ).toBeNull()
+  })
+
+  it("does not delete an option when a cancelled order precedes an active one", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const cancelled = await draftFor(t, event, "cancelled-option@example.com")
+    await cancelled.guest.client.mutation(
+      api.checkout.submit,
+      submitArgs(event, cancelled.proofId, "option-cancelled-submit")
+    )
+    await cancelled.guest.client.mutation(api.checkout.cancelMine, {
+      shareToken: event.shareToken,
+      requestId: "option-cancelled-release",
+    })
+    const active = await draftFor(t, event, "active-option@example.com")
+    await active.guest.client.mutation(
+      api.checkout.submit,
+      submitArgs(event, active.proofId, "option-active-submit")
+    )
+    await expect(
+      event.owner.client.mutation(api.eventSetup.removeFulfillmentOption, {
+        optionId: event.optionId,
+      })
+    ).rejects.toThrow("active order")
   })
 })

@@ -173,16 +173,30 @@ export function OrderFlow({
     for (const line of checkout.lines) next[line.itemId] = line.quantity
     const saved =
       checkout.order.lifecycle !== "draft" && pendingEditKey
-        ? window.localStorage.getItem(pendingEditKey)
+        ? window.sessionStorage.getItem(pendingEditKey)
         : null
     let edit: PendingEdit | null = null
     try {
       edit = saved ? (JSON.parse(saved) as PendingEdit) : null
     } catch {
-      if (pendingEditKey) window.localStorage.removeItem(pendingEditKey)
+      if (pendingEditKey) window.sessionStorage.removeItem(pendingEditKey)
     }
+    const restoredOption =
+      edit?.optionId ?? checkout.order.fulfillmentOptionId ?? ""
+    const optionIsAvailable =
+      checkout.order.lifecycle !== "draft" ||
+      !restoredOption ||
+      checkout.fulfillmentOptions.some(
+        (option) => option._id === restoredOption
+      )
     setQuantities(edit?.quantities ?? next)
-    setOptionId(edit?.optionId ?? checkout.order.fulfillmentOptionId ?? "")
+    setOptionId(optionIsAvailable ? restoredOption : "")
+    if (!optionIsAvailable && pendingEditKey) {
+      const cleared = { ...(edit ?? {}) }
+      delete cleared.optionId
+      delete cleared.details
+      window.sessionStorage.setItem(pendingEditKey, JSON.stringify(cleared))
+    }
     setGuestName(edit?.guestName ?? checkout.order.guestName ?? "")
     setGuestPhone(edit?.guestPhone ?? checkout.order.guestPhone ?? "")
     setDetails(edit?.details ?? checkout.order.fulfillmentDetails ?? {})
@@ -204,7 +218,7 @@ export function OrderFlow({
       checkout?.order?.lifecycle === "draft"
     )
       return
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       pendingEditKey,
       JSON.stringify({
         quantities,
@@ -335,10 +349,10 @@ export function OrderFlow({
       return
     setProofId(null)
     if (pendingEditKey) {
-      const saved = window.localStorage.getItem(pendingEditKey)
+      const saved = window.sessionStorage.getItem(pendingEditKey)
       const edit = saved ? (JSON.parse(saved) as Record<string, unknown>) : {}
       delete edit.proofId
-      window.localStorage.setItem(pendingEditKey, JSON.stringify(edit))
+      window.sessionStorage.setItem(pendingEditKey, JSON.stringify(edit))
     }
   }, [checkout?.order, pendingEditKey, proofId, proposal.totalMinor])
 
@@ -432,7 +446,7 @@ export function OrderFlow({
       if (checkout.order?.lifecycle !== "draft") {
         setEditReviewed(reviewed)
         if (pendingEditKey)
-          window.localStorage.setItem(
+          window.sessionStorage.setItem(
             pendingEditKey,
             JSON.stringify({
               quantities,
@@ -503,11 +517,11 @@ export function OrderFlow({
       if (!finalized.ok) throw new Error(finalized.message)
       setProofId(finalized.proofId)
       if (pendingEditKey) {
-        const saved = window.localStorage.getItem(pendingEditKey)
+        const saved = window.sessionStorage.getItem(pendingEditKey)
         const draft = saved
           ? (JSON.parse(saved) as Record<string, unknown>)
           : {}
-        window.localStorage.setItem(
+        window.sessionStorage.setItem(
           pendingEditKey,
           JSON.stringify({
             ...draft,
@@ -554,7 +568,7 @@ export function OrderFlow({
             ? await resubmitRejected({ ...payload, proofId: proofId as never })
             : await submit({ ...payload, proofId: proofId as never })
       submitRequestId.current = null
-      if (pendingEditKey) window.localStorage.removeItem(pendingEditKey)
+      if (pendingEditKey) window.sessionStorage.removeItem(pendingEditKey)
       router.replace(`/e/${shareToken}/order/confirmation?orderId=${orderId}`)
     } catch (cause) {
       setError(

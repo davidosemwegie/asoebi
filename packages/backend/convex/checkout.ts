@@ -49,6 +49,12 @@ const internalCheckout = internal as unknown as {
       { orderId: Id<"orders"> },
       null
     >
+    projectInvitationSubmission: FunctionReference<
+      "mutation",
+      "internal",
+      { orderId: Id<"orders"> },
+      null
+    >
     cleanExpiredOrderArtifacts: FunctionReference<
       "mutation",
       "internal",
@@ -122,6 +128,20 @@ function searchText(order: {
     .toLowerCase()
 }
 
+function normalizeGuest(
+  guestName: string | undefined,
+  guestPhone: string | undefined,
+  required = false
+) {
+  const name = guestName?.trim() || undefined
+  const phone = guestPhone?.trim() || undefined
+  if (required && !name) throw new ConvexError("Enter your name.")
+  if (name && name.length > 160) throw new ConvexError("Your name is too long.")
+  if (phone && phone.length > 80)
+    throw new ConvexError("Phone number is too long.")
+  return { guestName: name, guestPhone: phone }
+}
+
 async function writeLines(
   ctx: MutationCtx,
   order: Doc<"orders">,
@@ -137,6 +157,7 @@ async function writeLines(
       orderId: order._id,
       currency: order.currency ?? "",
       paymentStatus: order.paymentStatus,
+      lifecycle: order.lifecycle,
       progress: order.progress,
       fulfillmentOptionId: order.fulfillmentOptionId,
       searchText: `${order.reference} ${line.itemName}`.toLowerCase(),
@@ -151,6 +172,7 @@ async function patchLineProjections(ctx: MutationCtx, order: Doc<"orders">) {
   for (const line of lines) {
     await ctx.db.patch(line._id, {
       paymentStatus: order.paymentStatus,
+      lifecycle: order.lifecycle,
       progress: order.progress,
       fulfillmentOptionId: order.fulfillmentOptionId,
       updatedAt: Date.now(),
@@ -174,8 +196,7 @@ async function requireProof(
     proof.eventId !== args.eventId ||
     proof.attendeeId !== args.attendeeId ||
     proof.status !== "active" ||
-    (proof.orderId !== undefined &&
-      (proof.orderId !== args.orderId || !args.allowCurrent))
+    (proof.orderId !== undefined && proof.orderId !== args.orderId)
   ) {
     throw new ConvexError("Upload a valid payment receipt before submitting.")
   }
@@ -435,8 +456,7 @@ export const saveDraft = mutation({
         itemSubtotalMinor: 0,
         fulfillmentFeeMinor: 0,
         totalMinor: 0,
-        guestName: args.guestName?.trim() || undefined,
-        guestPhone: args.guestPhone?.trim() || undefined,
+        ...normalizeGuest(args.guestName, args.guestPhone),
         reviewedAt: args.reviewed ? Date.now() : undefined,
         proofRequired: false,
         updatedAt: Date.now(),
@@ -482,8 +502,7 @@ export const saveDraft = mutation({
         itemSubtotalMinor,
         totalMinor: itemSubtotalMinor,
         fulfillmentFeeMinor: 0,
-        guestName: args.guestName?.trim() || undefined,
-        guestPhone: args.guestPhone?.trim() || undefined,
+        ...normalizeGuest(args.guestName, args.guestPhone),
         reviewedAt: args.reviewed ? Date.now() : undefined,
         proofRequired: false,
         updatedAt: Date.now(),
@@ -503,8 +522,7 @@ export const saveDraft = mutation({
     const patch = {
       ...snapshotOrder,
       currency: event.currency,
-      guestName: args.guestName?.trim() || undefined,
-      guestPhone: args.guestPhone?.trim() || undefined,
+      ...normalizeGuest(args.guestName, args.guestPhone),
       reviewedAt: args.reviewed ? Date.now() : undefined,
       proofRequired: false,
       updatedAt: Date.now(),
@@ -565,12 +583,11 @@ export const submit = mutation({
       orderId: order._id,
       allowCurrent: args.proofId === order.currentProofId,
     })
-    const guestName = args.guestName.trim()
-    if (!guestName || guestName.length > 160)
-      throw new ConvexError("Enter your name.")
-    const guestPhone = args.guestPhone?.trim() || undefined
-    if (guestPhone && guestPhone.length > 80)
-      throw new ConvexError("Phone number is too long.")
+    const { guestName, guestPhone } = normalizeGuest(
+      args.guestName,
+      args.guestPhone,
+      true
+    )
     await adjustReservations(ctx, [], snapshotLines)
     const now = Date.now()
     await ctx.db.patch(order._id, {
@@ -580,7 +597,7 @@ export const submit = mutation({
       paymentStatus: "pending_review",
       progress: "pending",
       reservationState: "reserved",
-      guestName,
+      guestName: guestName!,
       guestEmail: user.email.trim().toLowerCase(),
       guestPhone,
       currentProofId: proof._id,
@@ -615,6 +632,11 @@ export const submit = mutation({
     await ctx.scheduler.runAfter(0, internalCheckout.checkout.afterSubmit, {
       orderId: updated._id,
     })
+    await ctx.scheduler.runAfter(
+      0,
+      internalCheckout.checkout.projectInvitationSubmission,
+      { orderId: updated._id }
+    )
     return updated._id
   },
 })
@@ -689,14 +711,16 @@ export const updatePending = mutation({
       })
     }
     await adjustReservations(ctx, oldLines, snapshotLines)
-    const guestName = args.guestName.trim()
-    if (!guestName || guestName.length > 160)
-      throw new ConvexError("Enter your name.")
+    const { guestName, guestPhone } = normalizeGuest(
+      args.guestName,
+      args.guestPhone,
+      true
+    )
     await ctx.db.patch(order._id, {
       ...snapshotOrder,
       currency: order.currency ?? event.currency,
-      guestName,
-      guestPhone: args.guestPhone?.trim() || undefined,
+      guestName: guestName!,
+      guestPhone,
       currentProofId: proof._id,
       proofRequired: false,
       searchText: searchText({
@@ -749,6 +773,7 @@ export const resubmitRejected = mutation({
     const order = await activeOrder(ctx, attendee)
     if (
       !order ||
+      order.lifecycle !== "submitted" ||
       order.paymentStatus !== "rejected" ||
       order.reservationState !== "released"
     )
@@ -776,18 +801,20 @@ export const resubmitRejected = mutation({
         invalidatedAt: Date.now(),
       })
     await adjustReservations(ctx, [], snapshotLines)
-    const guestName = args.guestName.trim()
-    if (!guestName || guestName.length > 160)
-      throw new ConvexError("Enter your name.")
+    const { guestName, guestPhone } = normalizeGuest(
+      args.guestName,
+      args.guestPhone,
+      true
+    )
     await ctx.db.patch(order._id, {
       ...snapshotOrder,
       currency: order.currency ?? event.currency,
       paymentStatus: "pending_review",
       progress: "pending",
       reservationState: "reserved",
-      guestName,
+      guestName: guestName!,
       guestEmail: user.email.trim().toLowerCase(),
-      guestPhone: args.guestPhone?.trim() || undefined,
+      guestPhone,
       currentProofId: proof._id,
       proofRequired: false,
       submittedAt: Date.now(),
@@ -819,6 +846,11 @@ export const resubmitRejected = mutation({
     await ctx.scheduler.runAfter(0, internalCheckout.checkout.afterSubmit, {
       orderId: updated._id,
     })
+    await ctx.scheduler.runAfter(
+      0,
+      internalCheckout.checkout.projectInvitationSubmission,
+      { orderId: updated._id }
+    )
     return updated._id
   },
 })
@@ -954,10 +986,22 @@ export const generateProofUploadUrl = mutation({
 
 export const inspectProofUpload = internalQuery({
   args: { claimId: v.id("proofUploadClaims"), storageId: v.id("_storage") },
-  returns: v.any(),
+  returns: v.union(
+    v.object({
+      eventId: v.id("events"),
+      attendeeId: v.id("eventAttendees"),
+      orderId: v.id("orders"),
+      uploaderUserId: v.string(),
+      contentType: v.string(),
+      size: v.number(),
+      sha256: v.string(),
+    }),
+    v.null()
+  ),
   handler: async (ctx, args) => {
     const user = await authComponent.getAuthUser(ctx)
     const claim = await ctx.db.get(args.claimId)
+    if (claim && claim.uploaderUserId !== user._id) return null
     const metadata = await ctx.db.system.get("_storage", args.storageId)
     const order = claim ? await ctx.db.get(claim.orderId) : null
     if (
@@ -1006,6 +1050,12 @@ export const finalizeProofUpload = internalMutation({
   handler: async (ctx, args) => {
     const user = await authComponent.getAuthUser(ctx)
     const claim = await ctx.db.get(args.claimId)
+    // A foreign caller must not consume or delete a victim's claim.
+    if (claim && claim.uploaderUserId !== user._id)
+      return {
+        ok: false as const,
+        message: "This payment receipt could not be verified. Upload it again.",
+      }
     const metadata = await ctx.db.system.get("_storage", args.storageId)
     const order = claim ? await ctx.db.get(claim.orderId) : null
     if (
@@ -1047,6 +1097,7 @@ export const finalizeProofUpload = internalMutation({
     const proofId = await ctx.db.insert("paymentProofs", {
       eventId: claim.eventId,
       attendeeId: claim.attendeeId,
+      orderId: claim.orderId,
       storageId: args.storageId,
       contentType: claim.contentType,
       size: claim.size,
@@ -1055,6 +1106,22 @@ export const finalizeProofUpload = internalMutation({
       status: "active",
       createdAt: Date.now(),
     })
+    const existingCandidates = await ctx.db
+      .query("paymentProofs")
+      .withIndex("by_orderId", (q) => q.eq("orderId", claim.orderId))
+      .take(20)
+    for (const candidate of existingCandidates) {
+      if (
+        candidate._id !== proofId &&
+        candidate._id !== order.currentProofId &&
+        candidate.status === "active"
+      ) {
+        await ctx.db.patch(candidate._id, {
+          status: "invalidated",
+          invalidatedAt: Date.now(),
+        })
+      }
+    }
     if (order.lifecycle === "draft") {
       if (order.currentProofId)
         await ctx.db.patch(order.currentProofId, {
@@ -1120,8 +1187,19 @@ export const afterSubmit = internalMutation({
         },
       })
     }
+    return null
+  },
+})
+
+export const projectInvitationSubmission = internalMutation({
+  args: { orderId: v.id("orders") },
+  returns: v.null(),
+  handler: async (ctx, { orderId }) => {
+    const order = await ctx.db.get(orderId)
+    if (!order || !order.guestEmail || order.paymentStatus !== "pending_review")
+      return null
     await ctx.runMutation(internal.eventInvitations.markOrderSubmitted, {
-      eventId: event._id,
+      eventId: order.eventId,
       attendeeId: order.attendeeId,
       userId: order.userId,
       email: order.guestEmail,

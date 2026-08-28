@@ -130,9 +130,15 @@ export function OrderDetail({ orderId }: { orderId: string }) {
             void cancel({
               shareToken: event.shareToken,
               requestId: crypto.randomUUID().replaceAll("-", ""),
-            }).catch((cause) =>
-              setError(cause instanceof Error ? cause.message : "Try again.")
-            )
+            })
+              .then(() =>
+                window.sessionStorage.removeItem(
+                  `asoebi:order-edit:${order._id}`
+                )
+              )
+              .catch((cause) =>
+                setError(cause instanceof Error ? cause.message : "Try again.")
+              )
           }}
         >
           Cancel order

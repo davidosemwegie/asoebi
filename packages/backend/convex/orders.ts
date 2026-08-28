@@ -21,6 +21,47 @@ const orderCard = v.object({
   updatedAt: v.number(),
 })
 
+const mineDetail = v.object({
+  order: v.object({
+    _id: v.id("orders"),
+    reference: v.string(),
+    lifecycle: orderLifecycle,
+    paymentStatus,
+    progress: orderProgress,
+    totalMinor: v.number(),
+    currency: v.optional(v.string()),
+    fulfillmentOptionName: v.union(v.string(), v.null()),
+    fulfillmentInstructions: v.union(v.string(), v.null()),
+    currentProofId: v.union(v.id("paymentProofs"), v.null()),
+  }),
+  event: v.union(
+    v.object({
+      name: v.string(),
+      shareToken: v.union(v.string(), v.null()),
+      orderingOpen: v.boolean(),
+    }),
+    v.null()
+  ),
+  lines: v.array(
+    v.object({
+      _id: v.id("orderLines"),
+      itemName: v.string(),
+      quantity: v.number(),
+      lineTotalMinor: v.number(),
+      currency: v.string(),
+    })
+  ),
+  history: v.array(
+    v.object({
+      _id: v.id("orderStatusHistory"),
+      paymentStatus,
+      progress: orderProgress,
+      createdAt: v.number(),
+    })
+  ),
+  receiptSubmitted: v.boolean(),
+})
+
 export const listMine = query({
   args: { paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(orderCard),
@@ -54,7 +95,7 @@ export const listMine = query({
 
 export const getMine = query({
   args: { orderId: v.id("orders") },
-  returns: v.any(),
+  returns: mineDetail,
   handler: async (ctx, { orderId }) => {
     const user = await authComponent.getAuthUser(ctx)
     const order = await ctx.db.get(orderId)
@@ -76,9 +117,16 @@ export const getMine = query({
     ])
     return {
       order: {
-        ...order,
+        _id: order._id,
+        reference: order.reference,
+        lifecycle: order.lifecycle,
+        paymentStatus: order.paymentStatus,
+        progress: order.progress,
+        totalMinor: order.totalMinor,
+        currency: order.currency,
+        fulfillmentOptionName: order.fulfillmentOptionName ?? null,
+        fulfillmentInstructions: order.fulfillmentInstructions ?? null,
         currentProofId: order.currentProofId ?? null,
-        fulfillmentDetails: order.fulfillmentDetails ?? null,
       },
       event: event
         ? {
@@ -89,8 +137,19 @@ export const getMine = query({
               (event.orderDeadlineAt ?? 0) > Date.now(),
           }
         : null,
-      lines,
-      history,
+      lines: lines.map((line) => ({
+        _id: line._id,
+        itemName: line.itemName,
+        quantity: line.quantity,
+        lineTotalMinor: line.lineTotalMinor,
+        currency: line.currency,
+      })),
+      history: history.map((entry) => ({
+        _id: entry._id,
+        paymentStatus: entry.paymentStatus,
+        progress: entry.progress,
+        createdAt: entry.createdAt,
+      })),
       receiptSubmitted: order.currentProofId !== undefined,
     }
   },

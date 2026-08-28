@@ -178,6 +178,11 @@ export default defineSchema({
       "fulfillmentOptionId",
       "updatedAt",
     ])
+    .index("by_eventId_and_fulfillmentOptionId_and_lifecycle", [
+      "eventId",
+      "fulfillmentOptionId",
+      "lifecycle",
+    ])
     .searchIndex("search_eventId_and_text", {
       searchField: "searchText",
       filterFields: ["eventId", "paymentStatus", "progress", "lifecycle"],
@@ -196,6 +201,7 @@ export default defineSchema({
     // Indexed projections are deliberately duplicated so PR 6 can filter by
     // item before pagination instead of filtering a page in memory.
     paymentStatus,
+    lifecycle: orderLifecycle,
     progress: orderProgress,
     fulfillmentOptionId: v.optional(v.id("fulfillmentOptions")),
     searchText: v.string(),
@@ -212,6 +218,11 @@ export default defineSchema({
       "eventId",
       "itemId",
       "progress",
+    ])
+    .index("by_eventId_and_itemId_and_lifecycle", [
+      "eventId",
+      "itemId",
+      "lifecycle",
     ])
     .index("by_eventId_and_fulfillmentOptionId_and_paymentStatus", [
       "eventId",
