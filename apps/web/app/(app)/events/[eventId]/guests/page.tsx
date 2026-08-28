@@ -1,10 +1,5 @@
-import { EventSectionPlaceholder } from "@/components/event-section-placeholder"
+import { EventGuests } from "@/components/event-guests"
 
 export default function EventGuestsPage() {
-  return (
-    <EventSectionPlaceholder
-      title="Guest management is coming later"
-      description="Guests who join this event will be manageable here when invitation and guest operations ship."
-    />
-  )
+  return <EventGuests />
 }

@@ -85,6 +85,108 @@ export default defineSchema({
   })
     .index("by_eventId_and_userId", ["eventId", "userId"])
     .index("by_userId_and_eventId", ["userId", "eventId"]),
+  eventInvitations: defineTable({
+    eventId: v.id("events"),
+    name: v.string(),
+    email: v.string(),
+    normalizedEmail: v.string(),
+    searchText: v.string(),
+    source: v.union(v.literal("manual"), v.literal("csv"), v.literal("paste")),
+    latestDeliveryState: v.union(
+      v.literal("not_sent"),
+      v.literal("queued"),
+      v.literal("sent"),
+      v.literal("delivered"),
+      v.literal("delayed"),
+      v.literal("failed"),
+      v.literal("suppressed")
+    ),
+    activity: v.union(
+      v.literal("not_started"),
+      v.literal("checkout_started"),
+      v.literal("order_submitted"),
+      v.literal("order_completed")
+    ),
+    matchedUserId: v.optional(v.string()),
+    attendeeId: v.optional(v.id("eventAttendees")),
+    orderId: v.optional(v.string()),
+    sendGeneration: v.number(),
+    currentNotificationId: v.optional(v.id("notifications")),
+    latestSentAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_eventId_and_normalizedEmail", ["eventId", "normalizedEmail"])
+    .index("by_eventId_and_createdAt", ["eventId", "createdAt"])
+    .index("by_eventId_and_latestDeliveryState_and_createdAt", [
+      "eventId",
+      "latestDeliveryState",
+      "createdAt",
+    ])
+    .index("by_eventId_and_activity_and_createdAt", [
+      "eventId",
+      "activity",
+      "createdAt",
+    ])
+    .index("by_eventId_and_latestDeliveryState_and_activity_and_createdAt", [
+      "eventId",
+      "latestDeliveryState",
+      "activity",
+      "createdAt",
+    ])
+    .index("by_currentNotificationId", ["currentNotificationId"])
+    .searchIndex("search_eventId_and_text", {
+      searchField: "searchText",
+      filterFields: ["eventId", "latestDeliveryState", "activity"],
+    }),
+  eventInvitationImportChunks: defineTable({
+    eventId: v.id("events"),
+    importId: v.string(),
+    chunkIndex: v.number(),
+    payloadHash: v.string(),
+    outcomes: v.array(
+      v.object({
+        rowNumber: v.number(),
+        outcome: v.union(
+          v.literal("created"),
+          v.literal("duplicate"),
+          v.literal("invalid")
+        ),
+        invitationId: v.optional(v.id("eventInvitations")),
+        error: v.optional(v.string()),
+      })
+    ),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_eventId_and_importId_and_chunkIndex", [
+      "eventId",
+      "importId",
+      "chunkIndex",
+    ])
+    .index("by_expiresAt", ["expiresAt"]),
+  eventInvitationSendRequests: defineTable({
+    eventId: v.id("events"),
+    requestId: v.string(),
+    kind: v.union(v.literal("send"), v.literal("retry")),
+    invitationIds: v.array(v.id("eventInvitations")),
+    results: v.array(
+      v.object({
+        invitationId: v.id("eventInvitations"),
+        outcome: v.union(
+          v.literal("queued"),
+          v.literal("retried"),
+          v.literal("already_sent"),
+          v.literal("blocked"),
+          v.literal("not_found")
+        ),
+      })
+    ),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_eventId_and_requestId", ["eventId", "requestId"])
+    .index("by_expiresAt", ["expiresAt"]),
   eventPaymentInstructions: defineTable({
     eventId: v.id("events"),
     instructions: v.string(),

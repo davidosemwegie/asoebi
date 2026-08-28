@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values"
 
 import { authComponent } from "./auth"
+import { internal } from "./_generated/api"
 import { mutation } from "./_generated/server"
 
 const SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/
@@ -34,14 +35,21 @@ export const startCheckout = mutation({
         q.eq("eventId", event._id).eq("userId", user._id)
       )
       .unique()
-    if (existing) return null
-
     const now = Date.now()
-    await ctx.db.insert("eventAttendees", {
+    const attendeeId = existing
+      ? existing._id
+      : await ctx.db.insert("eventAttendees", {
+          eventId: event._id,
+          userId: user._id,
+          createdAt: now,
+          updatedAt: now,
+        })
+    await ctx.runMutation(internal.eventInvitations.matchCheckoutStarted, {
       eventId: event._id,
+      attendeeId,
       userId: user._id,
-      createdAt: now,
-      updatedAt: now,
+      email: user.email,
+      emailVerified: user.emailVerified === true,
     })
     return null
   },

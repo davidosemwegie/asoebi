@@ -24,5 +24,11 @@ crons.interval(
   { hours: 24 },
   internal.emailCleanup.cleanPendingSuppressions
 )
+crons.interval(
+  "clean invitation operation receipts",
+  { hours: 24 },
+  internal.eventInvitations.cleanExpiredReceipts,
+  {}
+)
 
 export default crons

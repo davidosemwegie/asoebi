@@ -100,7 +100,7 @@ export function EventWorkspace({
 
   const activeTab = pathname.endsWith("/catalog")
     ? "items"
-    : pathname.endsWith("/guests")
+    : pathname.includes("/guests")
       ? "guests"
       : pathname.endsWith("/orders")
         ? "orders"
