@@ -1,4 +1,4 @@
-import { ConvexError, v } from "convex/values"
+import { ConvexError, type Infer, v } from "convex/values"
 import { paginationOptsValidator } from "convex/server"
 
 import { requireOwnedEvent } from "./eventModel"
@@ -8,8 +8,16 @@ import {
 } from "./eventInvitationAggregates"
 import { projectOrderCompletion } from "./eventInvitations"
 import { createNotification } from "./notifications"
+import type { NotificationTemplate } from "./notificationTypes"
 import { appendOrderHistory, releaseReservation } from "./orderModel"
 import { normalizeOrderSearch } from "./organizerOrderFilters"
+import {
+  fulfillmentDetails,
+  fulfillmentType,
+  orderLifecycle,
+  orderProgress,
+  paymentStatus,
+} from "./schema"
 import {
   itemDemand,
   orderPaymentCounts,
@@ -48,6 +56,99 @@ const progressFilter = v.optional(
     v.literal("cancelled")
   )
 )
+const orderSummaryResult = v.object({
+  _id: v.id("orders"),
+  reference: v.string(),
+  lifecycle: orderLifecycle,
+  guestName: v.string(),
+  guestEmail: v.optional(v.string()),
+  guestPhone: v.optional(v.string()),
+  totalMinor: v.number(),
+  itemSubtotalMinor: v.number(),
+  fulfillmentFeeMinor: v.number(),
+  currency: v.string(),
+  paymentStatus,
+  progress: orderProgress,
+  fulfillmentType: v.optional(fulfillmentType),
+  fulfillmentOptionName: v.optional(v.string()),
+  submittedAt: v.optional(v.number()),
+})
+const orderLineDetailResult = v.object({
+  _id: v.id("orderLines"),
+  itemName: v.string(),
+  quantity: v.number(),
+  lineTotalMinor: v.number(),
+  currency: v.string(),
+})
+const paymentBreakdownResult = v.object({
+  not_submitted: v.number(),
+  pending_review: v.number(),
+  confirmed: v.number(),
+  rejected: v.number(),
+})
+const progressBreakdownResult = v.object({
+  pending: v.number(),
+  preparing: v.number(),
+  ready_for_pickup: v.number(),
+  dispatched: v.number(),
+  fulfilled: v.number(),
+  cancelled: v.number(),
+})
+const organizerSummaryResult = v.object({
+  eventName: v.string(),
+  currency: v.string(),
+  submittedOrderCount: v.number(),
+  currentOrderValueMinor: v.number(),
+  paymentsNeedingReview: v.number(),
+  completedOrders: v.number(),
+  paymentBreakdown: paymentBreakdownResult,
+  progressBreakdown: progressBreakdownResult,
+  confirmedAwaitingPreparation: v.number(),
+  needsAttention: v.number(),
+  items: v.array(
+    v.object({
+      itemId: v.id("items"),
+      name: v.string(),
+      requested: v.number(),
+      setAside: v.number(),
+      available: v.number(),
+    })
+  ),
+  invitations: v.object({
+    total: v.number(),
+    notSent: v.number(),
+    queued: v.number(),
+    sent: v.number(),
+    delivered: v.number(),
+    delayed: v.number(),
+    failed: v.number(),
+    suppressed: v.number(),
+    needsAttention: v.number(),
+    ordersSubmitted: v.number(),
+    ordersCompleted: v.number(),
+  }),
+})
+const exportRowResult = v.object({
+  reference: v.string(),
+  guestName: v.string(),
+  guestEmail: v.string(),
+  guestPhone: v.string(),
+  item: v.string(),
+  quantity: v.number(),
+  unitPriceMinor: v.number(),
+  lineTotalMinor: v.number(),
+  orderTotalMinor: v.number(),
+  currency: v.string(),
+  paymentStatus,
+  progress: orderProgress,
+  fulfillment: v.string(),
+  fulfillmentType: v.string(),
+  submittedAt: v.number(),
+  reviewedAt: v.union(v.number(), v.string()),
+  fulfilledAt: v.union(v.number(), v.string()),
+  timeZone: v.string(),
+})
+type ExportRow = Infer<typeof exportRowResult>
 const listArgs = {
   eventId: v.id("events"),
   paginationOpts: paginationOptsValidator,
@@ -291,13 +392,17 @@ async function listOrders(ctx: QueryCtx, args: OrderListArgs) {
 
 export const list = query({
   args: listArgs,
-  returns: v.any(),
+  returns: v.object({
+    page: v.array(orderSummaryResult),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
   handler: listOrders,
 })
 
 export const getSummary = query({
   args: { eventId: v.id("events") },
-  returns: v.any(),
+  returns: organizerSummaryResult,
   handler: async (ctx, { eventId }) => {
     const event = await requireOwnedEvent(ctx, eventId)
     const [
@@ -420,8 +525,20 @@ export const getSummary = query({
       currentOrderValueMinor: value,
       paymentsNeedingReview: needsPaymentCheck,
       completedOrders: completed,
-      paymentBreakdown: Object.fromEntries(paymentCounts),
-      progressBreakdown: Object.fromEntries(progressCounts),
+      paymentBreakdown: {
+        not_submitted: paymentCounts[0]![1],
+        pending_review: paymentCounts[1]![1],
+        confirmed: paymentCounts[2]![1],
+        rejected: paymentCounts[3]![1],
+      },
+      progressBreakdown: {
+        pending: progressCounts[0]![1],
+        preparing: progressCounts[1]![1],
+        ready_for_pickup: progressCounts[2]![1],
+        dispatched: progressCounts[3]![1],
+        fulfilled: progressCounts[4]![1],
+        cancelled: progressCounts[5]![1],
+      },
       confirmedAwaitingPreparation,
       needsAttention:
         needsPaymentCheck +
@@ -456,7 +573,20 @@ export const getSummary = query({
 
 export const getDetail = query({
   args: { eventId: v.id("events"), orderId: v.id("orders") },
-  returns: v.any(),
+  returns: v.union(
+    v.object({
+      order: orderSummaryResult,
+      eventTimeZone: v.string(),
+      lines: v.array(orderLineDetailResult),
+      history: v.array(orderHistoryResult),
+      receiptAvailable: v.boolean(),
+      fulfillmentDetails: v.optional(fulfillmentDetails),
+      fulfillmentOptionName: v.optional(v.string()),
+      fulfillmentType: v.optional(fulfillmentType),
+      fulfillmentInstructions: v.optional(v.string()),
+    }),
+    v.null()
+  ),
   handler: async (ctx, args) => {
     const event = await requireOwnedEvent(ctx, args.eventId)
     const order = await ctx.db.get(args.orderId)
@@ -478,7 +608,13 @@ export const getDetail = query({
     return {
       order: summaryOrder(order),
       eventTimeZone: event.timeZone ?? "UTC",
-      lines,
+      lines: lines.map((line) => ({
+        _id: line._id,
+        itemName: line.itemName,
+        quantity: line.quantity,
+        lineTotalMinor: line.lineTotalMinor,
+        currency: line.currency,
+      })),
       history,
       receiptAvailable: Boolean(proof?.status === "active"),
       fulfillmentDetails: order.fulfillmentDetails,
@@ -531,7 +667,11 @@ export const getExportPage = internalQuery({
     ),
     itemId: v.optional(v.id("items")),
   },
-  returns: v.any(),
+  returns: v.object({
+    rows: v.array(exportRowResult),
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const event = await requireOwnedEvent(ctx, args.eventId)
     const page = await ctx.db
@@ -542,7 +682,7 @@ export const getExportPage = internalQuery({
       .order("desc")
       .paginate({ numItems: 25, cursor: args.cursor })
     const search = normalizeOrderSearch(args.search)
-    const rows: any[] = []
+    const rows: ExportRow[] = []
     for (const order of page.page) {
       if (!(await matchesOrderFilters(ctx, order, args, search))) continue
       const lines = await ctx.db
@@ -576,18 +716,47 @@ export const getExportPage = internalQuery({
   },
 })
 
+type LifecycleNotificationKind =
+  | "payment_confirmed"
+  | "payment_rejected"
+  | "organizer_cancelled"
+  | "preparing"
+  | "ready_for_pickup"
+  | "sent_for_delivery"
+  | "completed"
+
+function lifecycleTemplate(
+  kind: LifecycleNotificationKind,
+  payload: {
+    recipientName: string
+    eventName: string
+    orderReference: string
+    actionUrl: string
+  }
+): NotificationTemplate {
+  switch (kind) {
+    case "payment_confirmed":
+      return { kind: "payment_confirmed", ...payload }
+    case "payment_rejected":
+      return { kind: "payment_rejected", ...payload }
+    case "organizer_cancelled":
+      return { kind: "organizer_cancelled", ...payload }
+    case "preparing":
+      return { kind: "preparing", ...payload }
+    case "ready_for_pickup":
+      return { kind: "ready_for_pickup", ...payload }
+    case "sent_for_delivery":
+      return { kind: "sent_for_delivery", ...payload }
+    case "completed":
+      return { kind: "completed", ...payload }
+  }
+}
+
 async function notify(
   ctx: MutationCtx,
   order: Doc<"orders">,
   transitionId: Id<"orderStatusHistory">,
-  kind:
-    | "payment_confirmed"
-    | "payment_rejected"
-    | "organizer_cancelled"
-    | "preparing"
-    | "ready_for_pickup"
-    | "sent_for_delivery"
-    | "completed"
+  kind: LifecycleNotificationKind
 ) {
   const event = await ctx.db.get(order.eventId)
   if (!event || !order.guestEmail || !order.guestName) return
@@ -597,13 +766,12 @@ async function notify(
     ownerId: event.ownerId,
     eventRef: `${event._id}`,
     orderRef: `${order._id}`,
-    template: {
-      kind,
+    template: lifecycleTemplate(kind, {
       recipientName: order.guestName,
       eventName: event.name,
       orderReference: order.reference,
       actionUrl: `${env.SITE_URL}/orders/${order._id}`,
-    } as any,
+    }),
   })
 }
 
