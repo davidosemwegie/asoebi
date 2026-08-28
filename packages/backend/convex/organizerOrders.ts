@@ -590,7 +590,7 @@ async function orderCandidates(
       const page = await ctx.db
         .query("orders")
         .withIndex(
-          "by_eventId_and_fulfillmentOptionId_and_paymentStatus_and_updatedAt",
+          "by_eventId_option_payment_updated",
           (q) =>
             q
               .eq("eventId", args.eventId)
@@ -609,7 +609,7 @@ async function orderCandidates(
       const page = await ctx.db
         .query("orders")
         .withIndex(
-          "by_eventId_and_fulfillmentOptionId_and_progress_and_updatedAt",
+          "by_eventId_option_progress_updated",
           (q) =>
             q
               .eq("eventId", args.eventId)
@@ -643,7 +643,7 @@ async function orderCandidates(
     case "paymentProgress": {
       const page = await ctx.db
         .query("orders")
-        .withIndex("by_eventId_and_paymentStatus_and_progress_and_updatedAt", (q) =>
+        .withIndex("by_eventId_payment_progress_updated", (q) =>
           q
             .eq("eventId", args.eventId)
             .eq("paymentStatus", args.paymentStatus!)
@@ -691,7 +691,7 @@ async function orderCandidates(
       const page = await ctx.db
         .query("orders")
         .withIndex(
-          "by_eventId_and_fulfillmentType_and_paymentStatus_and_updatedAt",
+          "by_eventId_type_payment_updated",
           (q) =>
             q
               .eq("eventId", args.eventId)
@@ -710,7 +710,7 @@ async function orderCandidates(
       const page = await ctx.db
         .query("orders")
         .withIndex(
-          "by_eventId_and_fulfillmentType_and_progress_and_updatedAt",
+          "by_eventId_type_progress_updated",
           (q) =>
             q
               .eq("eventId", args.eventId)

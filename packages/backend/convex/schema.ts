@@ -180,19 +180,19 @@ export default defineSchema({
       "fulfillmentOptionId",
       "updatedAt",
     ])
-    .index("by_eventId_and_fulfillmentOptionId_and_paymentStatus_and_updatedAt", [
+    .index("by_eventId_option_payment_updated", [
       "eventId",
       "fulfillmentOptionId",
       "paymentStatus",
       "updatedAt",
     ])
-    .index("by_eventId_and_fulfillmentOptionId_and_progress_and_updatedAt", [
+    .index("by_eventId_option_progress_updated", [
       "eventId",
       "fulfillmentOptionId",
       "progress",
       "updatedAt",
     ])
-    .index("by_eventId_and_paymentStatus_and_progress_and_updatedAt", [
+    .index("by_eventId_payment_progress_updated", [
       "eventId",
       "paymentStatus",
       "progress",
@@ -208,13 +208,13 @@ export default defineSchema({
       "fulfillmentType",
       "updatedAt",
     ])
-    .index("by_eventId_and_fulfillmentType_and_paymentStatus_and_updatedAt", [
+    .index("by_eventId_type_payment_updated", [
       "eventId",
       "fulfillmentType",
       "paymentStatus",
       "updatedAt",
     ])
-    .index("by_eventId_and_fulfillmentType_and_progress_and_updatedAt", [
+    .index("by_eventId_type_progress_updated", [
       "eventId",
       "fulfillmentType",
       "progress",
