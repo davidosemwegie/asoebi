@@ -1,21 +1,22 @@
 "use client"
 
 import { useRef, useState } from "react"
+import Image from "next/image"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMutation } from "convex/react"
 import {
   CalendarDaysIcon,
   CircleAlertIcon,
   Clock3Icon,
-  Edit3Icon,
+  Settings2Icon,
   LoaderCircleIcon,
   MapPinIcon,
   Trash2Icon,
   UserRoundIcon,
 } from "lucide-react"
 
-import { EventEditorSheet } from "@/components/event-editor-sheet"
-import { formatDateValue } from "@/lib/dates"
+import { formatDateValue, formatDeadline } from "@/lib/dates"
 import { useEventWorkspace } from "@/components/event-workspace"
 import { api } from "@workspace/backend/convex/_generated/api"
 import {
@@ -42,33 +43,20 @@ import {
   CardTitle,
 } from "@workspace/ui/components/card"
 
-export function EventDetails({ editorOpen }: { editorOpen: boolean }) {
+const DEFAULT_BANNER = "/images/default-event-banner.webp"
+
+export function EventDetails() {
   const router = useRouter()
   const event = useEventWorkspace()
   const removeEvent = useMutation(api.events.remove)
-  const editButtonRef = useRef<HTMLButtonElement>(null)
   const deleteButtonRef = useRef<HTMLButtonElement>(null)
   const cancelDeleteButtonRef = useRef<HTMLButtonElement>(null)
-  const editorOpenedFromTriggerRef = useRef(false)
+  const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const eventPath = `/events/${event._id}`
-
-  function openEditor() {
-    editorOpenedFromTriggerRef.current = true
-    router.push(`${eventPath}?eventEditor=edit`, { scroll: false })
-  }
-
-  function closeEditor() {
-    if (editorOpenedFromTriggerRef.current) {
-      editorOpenedFromTriggerRef.current = false
-      router.back()
-    } else {
-      router.replace(eventPath, { scroll: false })
-    }
-  }
 
   function handleDeleteOpenChange(open: boolean) {
     if (!open && isDeleting) return
@@ -100,7 +88,10 @@ export function EventDetails({ editorOpen }: { editorOpen: boolean }) {
     },
     {
       label: "Order deadline",
-      value: formatDateValue(event.orderDeadline),
+      value:
+        event.orderDeadlineAt !== undefined && event.timeZone
+          ? formatDeadline(event.orderDeadlineAt, event.timeZone)
+          : `${formatDateValue(event.orderDeadline)} (date only — finish setup)`,
       icon: Clock3Icon,
     },
     { label: "Location", value: event.location, icon: MapPinIcon },
@@ -109,21 +100,38 @@ export function EventDetails({ editorOpen }: { editorOpen: boolean }) {
 
   return (
     <section className="space-y-6" aria-label="Event overview">
+      <div className="relative aspect-[1895/830] overflow-hidden rounded-xl border bg-muted">
+        <Image
+          src={
+            event.coverUrl && event.coverUrl !== failedCoverUrl
+              ? event.coverUrl
+              : DEFAULT_BANNER
+          }
+          alt={`${event.name} event cover`}
+          fill
+          sizes="(max-width: 768px) 100vw, 1100px"
+          className="object-cover"
+          onError={() => {
+            if (event.coverUrl) setFailedCoverUrl(event.coverUrl)
+          }}
+          priority
+        />
+      </div>
       <div className="flex flex-wrap justify-end gap-2">
         <Button
-          ref={editButtonRef}
-          type="button"
+          nativeButton={false}
           variant="outline"
-          onClick={openEditor}
-          disabled={event.status === "archived"}
+          render={<Link href={`${eventPath}/setup`} />}
+          className="min-h-11 px-4 text-base"
         >
-          <Edit3Icon aria-hidden="true" /> Edit event
+          <Settings2Icon aria-hidden="true" /> Open event setup
         </Button>
         {event.status === "draft" ? (
           <Button
             ref={deleteButtonRef}
             type="button"
             variant="destructive"
+            className="min-h-11 px-4 text-base"
             onClick={() => handleDeleteOpenChange(true)}
           >
             <Trash2Icon aria-hidden="true" /> Delete event
@@ -135,12 +143,12 @@ export function EventDetails({ editorOpen }: { editorOpen: boolean }) {
         <Card>
           <CardHeader>
             <CardTitle>About this event</CardTitle>
-            <CardDescription>
+            <CardDescription className="text-base">
               The description organizers use to identify this celebration.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="leading-7 text-pretty whitespace-pre-wrap text-muted-foreground">
+            <p className="text-base leading-7 text-pretty whitespace-pre-wrap text-muted-foreground">
               {event.description}
             </p>
           </CardContent>
@@ -154,12 +162,12 @@ export function EventDetails({ editorOpen }: { editorOpen: boolean }) {
               {details.map(({ label, value, icon: Icon }) => (
                 <div key={label} className="flex gap-3">
                   <Icon
-                    className="mt-0.5 size-4 text-muted-foreground"
+                    className="mt-0.5 size-5 text-muted-foreground"
                     aria-hidden="true"
                   />
                   <div>
-                    <dt className="text-xs text-muted-foreground">{label}</dt>
-                    <dd className="mt-0.5 font-medium">{value}</dd>
+                    <dt className="text-base text-muted-foreground">{label}</dt>
+                    <dd className="mt-0.5 text-base font-medium">{value}</dd>
                   </div>
                 </div>
               ))}
@@ -168,17 +176,6 @@ export function EventDetails({ editorOpen }: { editorOpen: boolean }) {
         </Card>
       </div>
 
-      <EventEditorSheet
-        mode="edit"
-        event={event}
-        open={editorOpen}
-        onOpenChange={(open) => {
-          if (!open) closeEditor()
-        }}
-        onSuccess={closeEditor}
-        getReturnFocus={() => editButtonRef.current}
-      />
-
       <AlertDialog open={deleteOpen} onOpenChange={handleDeleteOpenChange}>
         <AlertDialogContent
           initialFocus={cancelDeleteButtonRef}
@@ -186,9 +183,9 @@ export function EventDetails({ editorOpen }: { editorOpen: boolean }) {
         >
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {event.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently deletes the draft event and all of its catalog
-              items. This action cannot be undone.
+            <AlertDialogDescription className="text-base">
+              This permanently deletes the draft event and all of its items.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -203,12 +200,14 @@ export function EventDetails({ editorOpen }: { editorOpen: boolean }) {
           <AlertDialogFooter>
             <AlertDialogCancel
               ref={cancelDeleteButtonRef}
+              className="min-h-11 px-4 text-base"
               disabled={isDeleting}
             >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
               type="button"
+              className="min-h-11 px-4 text-base"
               onClick={handleDelete}
               disabled={isDeleting}
             >

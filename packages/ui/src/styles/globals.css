@@ -8,9 +8,11 @@
 @source "../**/*.{ts,tsx}";
 
 @theme inline {
-  --font-heading: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-heading:
+    "DM Sans", "DM Sans Fallback", ui-sans-serif, system-ui, sans-serif;
   --font-display:
-    var(--font-playfair-display), Georgia, "Times New Roman", serif;
+    "Playfair Display", "Playfair Display Fallback", Georgia, "Times New Roman",
+    serif;
   --color-brand-aubergine: var(--brand-aubergine);
   --color-brand-blackberry: var(--brand-blackberry);
   --color-brand-ivory: var(--brand-ivory);
@@ -55,8 +57,9 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-sans:
+    "DM Sans", "DM Sans Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
 }
 
 :root {
@@ -148,8 +151,7 @@
   }
 }
 
-[data-slot="sidebar-inset"],
-#main-content {
+[data-slot="sidebar-inset"] {
   min-width: 0;
 }
 

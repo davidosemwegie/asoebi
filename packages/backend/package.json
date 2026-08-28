@@ -10,12 +10,23 @@
     "typecheck": "tsc --noEmit -p convex"
   },
   "dependencies": {
+    "@convex-dev/aggregate": "^0.3.0",
     "@convex-dev/better-auth": "^0.12.5",
+    "@convex-dev/resend": "^0.2.7",
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.1.0",
     "better-auth": "~1.6.15",
-    "convex": "^1.45.0"
+    "convex": "^1.45.0",
+    "convex-helpers": "^0.1.123",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-email": "^6.9.3",
+    "svix": "^1.99.1"
   },
   "devDependencies": {
     "@edge-runtime/vm": "^5.0.0",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
     "convex-test": "^0.0.56",
     "typescript": "^5",
     "vite": "^8.2.2",

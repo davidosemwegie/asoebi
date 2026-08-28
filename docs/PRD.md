@@ -2,11 +2,13 @@
 
 ## Document status
 
-- **Status:** Draft v0.1
-- **Date:** August 25, 2026
+- **Status:** Approved MVP v0.2
+- **Date:** August 27, 2026
 - **Audience:** Product and engineering
 - **Source:** Party planning and logistics meeting notes dated August 25
-- **Implementation status:** Not started
+- **Implementation status:** In progress. Account, draft event, and item-catalog
+  foundations exist; event setup, public ordering, invitations, notifications,
+  order operations, and reporting are not yet fully shipped.
 
 ## Summary
 
@@ -27,7 +29,8 @@ Guests also lack a consistent way to understand what is available, submit a fami
 3. Consolidate item selections, payment evidence, contact details, and fulfillment information.
 4. Prevent overselling by reserving inventory when an order is submitted.
 5. Let organizers manually reconcile external payments and update fulfillment progress.
-6. Keep guests informed through email and opt-in WhatsApp notifications.
+6. Keep guests informed through transactional email first and opt-in WhatsApp
+   notifications before the complete MVP launch gate is declared met.
 7. Run one real event end-to-end without a separate spreadsheet acting as the source of truth.
 
 ## Non-goals
@@ -50,13 +53,35 @@ The MVP will not include:
 
 The celebrant, family member, event planner, or designated coordinator responsible for configuring the event, reviewing orders and payments, and coordinating fulfillment.
 
-Each event has exactly one owner in the MVP. A user may own multiple events and may also order as a guest at other events.
+There is one account model. Organizer and attendee are event-scoped
+relationships, not separate account types. Each event has exactly one owner in
+the MVP. A user may own multiple events and may also participate as an attendee
+at other events. The attendee relationship is implemented with the public event
+and ordering work, not by the event-foundation slice alone.
 
 ### Guest
 
 An invited attendee purchasing fabric, caps, or other event-specific items for themselves, a partner, or family members.
 
-Guests access an event through its private link and must have an account before viewing payment instructions or submitting an order.
+The organizer interface uses **Guests** as the plain-language label for invited
+or participating attendees. Guests access an event through its private link and
+must have an account before viewing payment instructions or submitting an
+order.
+
+## Product terminology and routes
+
+- **Organizer** means the sole owner of an event. The product does not call this
+  person a vendor, merchant, or administrator.
+- **Guest** is the interface label for an invited or participating attendee.
+  An invitation is outreach; an attendee relationship records participation.
+- **Items** is the organizer label for the event catalog.
+- The organizer workspace is rooted at `/events/[eventId]` and uses the stable
+  navigation labels `Overview`, `Items`, `Guests`, `Orders`, and `Event setup`.
+- A published event uses the unlisted public route `/e/[shareToken]`. Every
+  invitation and normal share action uses that same private event link; the MVP
+  does not issue invitation-specific access tokens.
+- Event, payment, and fulfillment states remain separate state axes. The
+  interface must not collapse them into an ambiguous generic order status.
 
 ## Core user journeys
 
@@ -93,16 +118,55 @@ Guests access an event through its private link and must have an account before 
 - **FR-AUTH-3:** A user can act as an organizer for events they own and as a guest for other events without separate accounts.
 - **FR-AUTH-4:** Only the event owner can view or change event administration, payment proofs, guest personal information, or exports.
 - **FR-AUTH-5:** Events are unlisted and use non-guessable shareable links. There is no public event discovery.
+- **FR-AUTH-6:** Organizer and attendee permissions are derived from their
+  event-scoped relationships on the server. A caller-supplied user identifier
+  never grants event access.
 
 ### Event management
 
 - **FR-EVENT-1:** An organizer can create, edit, permanently delete a draft, publish, close, reopen, and archive an event.
-- **FR-EVENT-2:** An event includes a name, description, date, location or location note, contact information, and optional cover image.
+- **FR-EVENT-2:** An event includes a name, description, date, location or location note, contact information, and optional uploaded cover image. When no valid upload exists, the product uses the standard Aso Circle event banner. The banner and uploaded cover are presented separately from event title text; neither requires embedded title text.
 - **FR-EVENT-3:** An event uses exactly one organizer-selected currency, defaulting to NGN. The currency can change until the first catalog item is added and is locked afterward. The product does not convert currencies.
-- **FR-EVENT-4:** An organizer must set an ordering deadline. When the deadline passes, new orders and guest edits are blocked.
+- **FR-EVENT-4:** An organizer must set an exact ordering-deadline timestamp and
+  an IANA event time zone. The interface displays and interprets the deadline in
+  that event time zone. When the exact deadline passes, new orders and guest
+  edits are blocked. Existing date-only records remain drafts until the owner
+  supplies an exact deadline and time zone.
 - **FR-EVENT-5:** Closing an event immediately blocks new orders and guest edits without removing existing order access.
-- **FR-EVENT-6:** Publishing requires at least one available item, external payment instructions, and one fulfillment option.
+- **FR-EVENT-6:** Publishing requires a verified owner email, a non-guessable
+  server-generated share token, a future exact deadline with a valid IANA time
+  zone, at least one available visible item, external payment instructions, and
+  at least one enabled fulfillment option. Readiness lists every unmet
+  requirement rather than stopping after the first failure.
 - **FR-EVENT-7:** Permanent deletion is available only for a draft event and atomically removes the event and its draft item catalog. Published, closed, and archived events cannot be permanently deleted.
+- **FR-EVENT-8:** An uploaded cover must be a validated supported image within
+  the configured size limit. Replacing or removing it also removes the prior
+  stored file when safe to do so.
+
+### Invitation management
+
+- **FR-INVITE-1:** Invitations are organizer outreach and are not access
+  control. A person with the normal private link may sign in and participate
+  even when no invitation row exists.
+- **FR-INVITE-2:** Organizers can prepare invitations manually, by CSV import,
+  or by pasting rows. Invitation records contain name and email only for the
+  MVP; phone numbers are not stored on invitation records.
+- **FR-INVITE-3:** Invitation email addresses are trimmed and compared
+  case-insensitively. There is at most one active invitation per normalized
+  email per event. Duplicate rows within one import and duplicates of existing
+  event invitations are reported explicitly and are not silently created or
+  sent twice.
+- **FR-INVITE-4:** CSV and pasted imports validate the supported name/email
+  columns, report row-level errors, and produce created, skipped-duplicate, and
+  invalid counts. Importing or editing an invitation never sends it
+  automatically.
+- **FR-INVITE-5:** An organizer explicitly chooses when to send or resend.
+  Every attempt appends send history with its timestamp, result, and provider
+  reference when available; a resend does not overwrite prior history.
+- **FR-INVITE-6:** A signed-in user is matched to an invitation only when the
+  account's verified email equals the normalized invited email. Matching helps
+  organizers understand outreach and attendance but does not gate access to the
+  private event link.
 
 ### Item catalog and inventory
 
@@ -159,6 +223,10 @@ Guests access an event through its private link and must have an account before 
 - **FR-NOTIFY-4:** When the organizer is connected and the guest has opted in, approved transactional WhatsApp templates are sent for the same lifecycle events as email.
 - **FR-NOTIFY-5:** WhatsApp failure must not block the underlying order action or its email notification.
 - **FR-NOTIFY-6:** The organizer can see whether each notification is queued, sent, delivered where supported, or failed, and can retry failed notifications.
+- **FR-NOTIFY-7:** Delivery is staged. Transactional email ships first.
+  WhatsApp remains required before the complete current MVP launch gate is
+  marked complete, but its later implementation must not block truthful status
+  reporting for the email-first stage.
 
 ### Organizer dashboard and export
 
@@ -167,6 +235,8 @@ Guests access an event through its private link and must have an account before 
 - **FR-DASH-3:** The organizer can open an order to review line items, proof of payment, guest details, fulfillment information, notes, and status history.
 - **FR-DASH-4:** The organizer can export the current filtered order set as CSV.
 - **FR-DASH-5:** CSV output uses one row per order line and includes order reference, item, quantity, unit price, order total, guest details, fulfillment information, payment status, fulfillment status, and relevant timestamps.
+- **FR-DASH-6:** Dashboard summaries, filters, and exports are scoped to one
+  event. Cross-event reporting and portfolio analytics are not part of the MVP.
 
 ## State models
 
@@ -215,19 +285,32 @@ Guests access an event through its private link and must have an account before 
 - **NFR-6 — Upload safety:** Validate file size and type, store payment proofs privately, and serve them only through authorized access.
 - **NFR-7 — Reliability:** Notification-provider failure must not roll back a successful order or status transition.
 - **NFR-8 — Auditability:** Preserve actor, timestamp, previous state, and new state for payment and fulfillment decisions.
-- **NFR-9 — Accessibility:** Core organizer and guest journeys must support keyboard operation, visible focus, form labels, understandable validation, and sufficient contrast.
-- **NFR-10 — Responsiveness:** Guest ordering and organizer review must work on current mobile and desktop browsers, with mobile treated as a primary guest surface.
+- **NFR-9 — Accessibility and language:** Use plain international English and
+  design for older adults as part of the standard experience, without a
+  patronizing special mode. Public-event body text is at least 18px; organizer
+  body and control text is at least 16px. Primary controls and inputs are at
+  least 48px high, and other interactive targets are at least 44 by 44px.
+  Forms use persistent labels, field-associated inline errors, and status cues
+  that combine text with icons where icons are useful. Keyboard users receive
+  visible focus. No required action is hover-only, and no critical outcome is
+  communicated only by a transient toast.
+- **NFR-10 — Responsiveness:** Guest ordering and organizer review must work on current mobile and desktop browsers, with mobile treated as a primary guest surface. Core flows must reflow without horizontal scrolling at 320 CSS pixels wide and remain usable at 200% browser zoom. Controls must not be hidden by device safe areas or the on-screen keyboard.
 - **NFR-11 — Export security:** CSV exports must be generated only for the owner and must not be publicly addressable.
+- **NFR-12 — Representative validation:** Before the MVP launch gate is marked
+  complete, representative community members, including older adults and
+  people who are less confident with digital ordering, validate the core setup,
+  ordering, payment-proof, and status journeys. Findings are addressed without
+  creating a separate or stigmatizing interface mode.
 
 ## Success criteria and launch gate
 
-The MVP is validated when one real event completes the following lifecycle with Aso Circle as the operational source of truth:
+The MVP is validated when one real event completes the following lifecycle with Aso Circle as the operational source of truth. Shipping the transactional-email stage alone is progress toward this gate, not completion of the full gate:
 
 1. The organizer independently creates and publishes the event.
 2. Real guests submit receipt-backed orders through private links.
 3. Inventory remains accurate with no duplicate reservations or overselling.
 4. The organizer confirms or rejects payments from the dashboard.
-5. Email and connected, opted-in WhatsApp notifications reflect lifecycle changes.
+5. Transactional email and connected, opted-in WhatsApp notifications reflect lifecycle changes. Email ships first; this item remains incomplete until the later WhatsApp stage is operational.
 6. The organizer coordinates pickup and delivery using the dashboard and CSV export.
 7. Orders reach `Fulfilled` without a separate spreadsheet being required to reconstruct current state.
 8. No guest can access another guest's private order or another organizer's event administration.

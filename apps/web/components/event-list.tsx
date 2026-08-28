@@ -53,6 +53,7 @@ export function EventList({
         <EmptyContent>
           <Button
             type="button"
+            className="min-h-12 text-base"
             onClick={(event) => onCreate(event.currentTarget)}
           >
             <PlusIcon aria-hidden="true" /> Create event
@@ -68,10 +69,8 @@ export function EventList({
       aria-label="Your events"
     >
       <div className="flex items-center justify-between border-b border-border/80 px-5 py-4 sm:px-6">
-        <h2 className="text-xs font-semibold tracking-[0.16em] uppercase">
-          Your events
-        </h2>
-        <span className="text-xs text-muted-foreground">
+        <h2 className="text-base font-semibold">Your events</h2>
+        <span className="text-base text-muted-foreground">
           {events.length} {events.length === 1 ? "event" : "events"}
         </span>
       </div>
@@ -90,11 +89,11 @@ export function EventList({
                 <span className="truncate font-display text-xl font-medium tracking-tight sm:text-2xl">
                   {event.name}
                 </span>
-                <span className="rounded-full border border-border/80 bg-background/45 px-2 py-0.5 text-[0.65rem] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+                <span className="rounded-full border border-border/80 bg-background/45 px-2.5 py-1 text-sm font-semibold text-muted-foreground capitalize">
                   {event.status}
                 </span>
               </span>
-              <span className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              <span className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-base text-muted-foreground">
                 <span>{formatDateValue(event.eventDate)}</span>
                 <span className="inline-flex items-center gap-1">
                   <MapPinIcon className="size-3.5" aria-hidden="true" />
@@ -102,7 +101,7 @@ export function EventList({
                 </span>
               </span>
             </span>
-            <span className="flex items-center justify-between gap-3 text-xs text-muted-foreground sm:justify-end">
+            <span className="flex items-center justify-between gap-3 text-base text-muted-foreground sm:justify-end">
               <span>{event.currency}</span>
               <ArrowUpRightIcon
                 className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"

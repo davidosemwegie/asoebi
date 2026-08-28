@@ -12,7 +12,7 @@ import { Separator } from "@workspace/ui/components/separator"
 import { SidebarTrigger } from "@workspace/ui/components/sidebar"
 
 const pageTitles: Record<string, string> = {
-  "/": "Events",
+  "/": "Home",
   "/settings": "Settings",
 }
 
@@ -20,11 +20,17 @@ export function PageHeader() {
   const pathname = usePathname()
   const title =
     pageTitles[pathname] ??
-    (pathname.endsWith("/catalog")
-      ? "Catalog"
-      : pathname.startsWith("/events/")
-        ? "Event overview"
-        : "Aso Circle")
+    (pathname.endsWith("/setup")
+      ? "Event setup"
+      : pathname.includes("/guests")
+        ? "Guests"
+        : pathname.endsWith("/orders")
+          ? "Orders"
+          : pathname.endsWith("/catalog")
+            ? "Items"
+            : pathname.startsWith("/events/")
+              ? "Event overview"
+              : "Aso Circle")
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/70 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 md:border-b-0">
@@ -37,7 +43,7 @@ export function PageHeader() {
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbPage className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
+              <BreadcrumbPage className="text-sm font-medium text-muted-foreground">
                 {title}
               </BreadcrumbPage>
             </BreadcrumbItem>

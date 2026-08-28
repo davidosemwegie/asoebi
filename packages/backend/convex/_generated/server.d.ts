@@ -31,6 +31,10 @@ type Env = {
   readonly CONVEX_CLOUD_URL: string;
   readonly CONVEX_SITE_URL: string;
   readonly BETTER_AUTH_SECRET: string;
+  readonly EMAIL_DELIVERY_MODE: "test" | "live" | undefined;
+  readonly EMAIL_FROM: string | undefined;
+  readonly RESEND_API_KEY: string | undefined;
+  readonly RESEND_WEBHOOK_SECRET: string | undefined;
   readonly SITE_URL: string;
 };
 

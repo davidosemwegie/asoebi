@@ -10,7 +10,7 @@ export async function generateMetadata({
   const { eventId } = await params
 
   return {
-    title: "Catalog",
+    title: "Items",
     alternates: { canonical: `/events/${eventId}/catalog` },
   }
 }

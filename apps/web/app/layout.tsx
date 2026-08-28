@@ -26,9 +26,21 @@ const fontMono = Geist_Mono({
   display: "swap",
 })
 
-const siteUrl = new URL(
-  process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
-)
+function getSiteUrl() {
+  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim()
+  const vercelHost =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
+    process.env.VERCEL_URL?.trim()
+  const value = configuredUrl || vercelHost || "http://localhost:3000"
+
+  return new URL(
+    value.startsWith("http://") || value.startsWith("https://")
+      ? value
+      : `https://${value}`
+  )
+}
+
+const siteUrl = getSiteUrl()
 
 const siteDescription =
   "Plan, share, and coordinate event looks with Aso Circle."
@@ -52,9 +64,6 @@ export const metadata: Metadata = {
     "birthday planning",
     "event ordering",
   ],
-  alternates: {
-    canonical: "/",
-  },
   formatDetection: {
     address: false,
     email: false,
@@ -64,7 +73,6 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "/",
     siteName: "Aso Circle",
     title: "Aso Circle",
     description: siteDescription,
@@ -101,11 +109,8 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: "light dark",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#F5F0E8" },
-    { media: "(prefers-color-scheme: dark)", color: "#180D14" },
-  ],
+  colorScheme: "light",
+  themeColor: "#F5F5F7",
 }
 
 export default async function RootLayout({
