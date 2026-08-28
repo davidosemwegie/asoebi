@@ -150,10 +150,12 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           <ul className="space-y-2">
             {lines.map((line) => (
               <li key={line._id} className="flex justify-between gap-3">
-                <span>
+                <span className="min-w-0 break-words">
                   {line.itemName} × {line.quantity}
                 </span>
-                <span>{formatMoney(line.lineTotalMinor, line.currency)}</span>
+                <span className="shrink-0 text-right">
+                  {formatMoney(line.lineTotalMinor, line.currency)}
+                </span>
               </li>
             ))}
           </ul>

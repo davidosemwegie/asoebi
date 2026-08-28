@@ -656,9 +656,9 @@ export function OrderFlow({
                           : undefined
                       }
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 break-words">
                         <p className="font-semibold">{item.name}</p>
-                        <p className="text-muted-foreground">
+                        <p className="break-words text-muted-foreground">
                           {formatMoney(
                             item.priceMinor,
                             checkout.event.currency
@@ -667,7 +667,7 @@ export function OrderFlow({
                           available
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-2">
                         <Button
                           type="button"
                           variant="outline"
@@ -777,6 +777,8 @@ export function OrderFlow({
                   <FieldLabel htmlFor="guest-name">Your name</FieldLabel>
                   <Input
                     id="guest-name"
+                    name="guestName"
+                    autoComplete="name"
                     className="min-h-12 text-lg"
                     required
                     value={guestName}
@@ -813,6 +815,8 @@ export function OrderFlow({
                     </FieldLabel>
                     <Input
                       id="detail-pickupContact"
+                      name="pickupContact"
+                      autoComplete="name"
                       className="min-h-12 text-lg"
                       required={
                         selectedOption.requiredFields.kind === "pickup" &&
@@ -845,6 +849,8 @@ export function OrderFlow({
                       </FieldLabel>
                       <Input
                         id="detail-recipientName"
+                        name="recipientName"
+                        autoComplete="name"
                         className="min-h-12 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
@@ -909,6 +915,8 @@ export function OrderFlow({
                       </FieldLabel>
                       <Textarea
                         id="detail-address"
+                        name="deliveryAddress"
+                        autoComplete="street-address"
                         className="min-h-24 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
@@ -939,6 +947,8 @@ export function OrderFlow({
                       </FieldLabel>
                       <Textarea
                         id="detail-availability"
+                        name="deliveryAvailability"
+                        autoComplete="off"
                         className="min-h-24 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
@@ -969,6 +979,8 @@ export function OrderFlow({
                       </FieldLabel>
                       <Textarea
                         id="detail-notes"
+                        name="deliveryNotes"
+                        autoComplete="off"
                         className="min-h-24 text-lg"
                         required={
                           selectedOption?.requiredFields.kind === "delivery" &&
@@ -1012,10 +1024,10 @@ export function OrderFlow({
                     key={line.itemName}
                     className="flex justify-between gap-3"
                   >
-                    <span>
+                    <span className="min-w-0 break-words">
                       {line.itemName} × {line.quantity}
                     </span>
-                    <span>
+                    <span className="shrink-0 text-right">
                       {formatMoney(
                         line.lineTotalMinor,
                         checkout.event.currency
