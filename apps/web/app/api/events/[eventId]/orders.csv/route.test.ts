@@ -51,7 +51,11 @@ describe("organizer CSV stream", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        Response.json({ rows: [row], continueCursor: "next", isDone: false })
+        Response.json({
+          rows: [{ ...row, progress: "cancelled" }],
+          continueCursor: "next",
+          isDone: false,
+        })
       )
       .mockResolvedValueOnce(
         Response.json({
@@ -63,7 +67,7 @@ describe("organizer CSV stream", () => {
     vi.stubGlobal("fetch", fetchMock)
     const response = await GET(
       new Request(
-        "http://localhost/api/events/event/orders.csv?itemId=item&fulfillmentType=pickup"
+        "http://localhost/api/events/event/orders.csv?itemId=item&fulfillmentType=pickup&progress=cancelled"
       ),
       { params: Promise.resolve({ eventId: "event" }) }
     )
@@ -74,6 +78,7 @@ describe("organizer CSV stream", () => {
     expect(csv.match(/Order reference/g)).toHaveLength(1)
     expect(csv).toContain("'=formula()")
     expect(csv).toContain('"Ada, ""A"""')
+    expect(csv).toContain("cancelled")
     expect(csv).toContain("SECOND")
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[0]?.[1]).toEqual({
@@ -82,6 +87,7 @@ describe("organizer CSV stream", () => {
     })
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain("cursor=next")
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("itemId=item")
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("progress=cancelled")
   })
 
   it("returns not found when the initial owner export request fails", async () => {

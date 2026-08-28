@@ -164,6 +164,7 @@ export default defineSchema({
       "lifecycle",
       "updatedAt",
     ])
+    .index("by_eventId_and_updatedAt", ["eventId", "updatedAt"])
     .index("by_eventId_and_paymentStatus_and_updatedAt", [
       "eventId",
       "paymentStatus",
@@ -183,6 +184,11 @@ export default defineSchema({
       "eventId",
       "fulfillmentOptionId",
       "lifecycle",
+    ])
+    .index("by_eventId_and_fulfillmentType_and_updatedAt", [
+      "eventId",
+      "fulfillmentType",
+      "updatedAt",
     ])
     .searchIndex("search_eventId_and_text", {
       searchField: "searchText",

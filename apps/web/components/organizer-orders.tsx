@@ -262,6 +262,7 @@ export function OrganizerOrders() {
             <SelectItem value="ready_for_pickup">Ready for pickup</SelectItem>
             <SelectItem value="dispatched">Sent for delivery</SelectItem>
             <SelectItem value="fulfilled">Completed</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
       </div>

@@ -32,6 +32,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
+import { Label } from "@workspace/ui/components/label"
+import { Textarea } from "@workspace/ui/components/textarea"
 
 type Detail = {
   order: {
@@ -75,6 +77,7 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
   const event = useEventWorkspace()
   const orderKey = orderId as Id<"orders">
   const [message, setMessage] = useState<string>()
+  const [paymentNote, setPaymentNote] = useState("")
   const [isMutating, setIsMutating] = useState(false)
   const [confirmation, setConfirmation] = useState<"reject" | "cancel" | null>(
     null
@@ -134,33 +137,50 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
   if (detail === null)
     return <p className="text-base">This order is not available.</p>
   const { order } = detail
+  const normalizedPaymentNote = paymentNote.trim() || undefined
   const action =
     order.lifecycle === "submitted" &&
     order.paymentStatus === "pending_review" ? (
-      <div className="flex flex-wrap gap-3">
-        <Button
-          className="min-h-12"
-          disabled={isMutating}
-          onClick={() =>
-            void run(() =>
-              decide({
-                eventId: event._id,
-                orderId: orderKey,
-                decision: "confirmed",
-              })
-            )
-          }
-        >
-          Confirm payment
-        </Button>
-        <Button
-          variant="outline"
-          className="min-h-12"
-          disabled={isMutating}
-          onClick={() => setConfirmation("reject")}
-        >
-          Reject payment
-        </Button>
+      <div className="grid gap-3">
+        <div className="grid gap-2">
+          <Label htmlFor="payment-decision-note" className="text-base">
+            Note for this payment decision (optional)
+          </Label>
+          <Textarea
+            id="payment-decision-note"
+            value={paymentNote}
+            maxLength={500}
+            disabled={isMutating}
+            onChange={(input) => setPaymentNote(input.target.value)}
+            className="min-h-24 text-base"
+          />
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Button
+            className="min-h-12"
+            disabled={isMutating}
+            onClick={() =>
+              void run(() =>
+                decide({
+                  eventId: event._id,
+                  orderId: orderKey,
+                  decision: "confirmed",
+                  note: normalizedPaymentNote,
+                })
+              )
+            }
+          >
+            Confirm payment
+          </Button>
+          <Button
+            variant="outline"
+            className="min-h-12"
+            disabled={isMutating}
+            onClick={() => setConfirmation("reject")}
+          >
+            Reject payment
+          </Button>
+        </div>
       </div>
     ) : order.lifecycle === "submitted" &&
       order.paymentStatus === "confirmed" &&
@@ -439,6 +459,7 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
                           eventId: event._id,
                           orderId: orderKey,
                           decision: "rejected",
+                          note: normalizedPaymentNote,
                         })
                     : () => cancel({ eventId: event._id, orderId: orderKey })
                 void run(operation).then((succeeded) => {

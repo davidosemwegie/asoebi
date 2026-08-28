@@ -130,7 +130,8 @@ async function event(t: Harness, type: "pickup" | "delivery" = "pickup") {
 async function submitted(
   t: Harness,
   setup: Awaited<ReturnType<typeof event>>,
-  email: string
+  email: string,
+  itemId = setup.itemId
 ) {
   const guest = await user(t, email)
   await guest.client.mutation(api.eventAttendees.startCheckout, {
@@ -147,7 +148,7 @@ async function submitted(
         }
   const orderId = await guest.client.mutation(api.checkout.saveDraft, {
     shareToken: setup.shareToken,
-    lines: [{ itemId: setup.itemId, quantity: 1 }],
+    lines: [{ itemId, quantity: 1 }],
     fulfillment,
     guestName: "Ada",
     guestPhone: "123",
@@ -173,7 +174,7 @@ async function submitted(
   await guest.client.mutation(api.checkout.submit, {
     shareToken: setup.shareToken,
     requestId: `submit-${email.replace(/[^A-Za-z0-9_-]/g, "-")}`,
-    lines: [{ itemId: setup.itemId, quantity: 1 }],
+    lines: [{ itemId, quantity: 1 }],
     fulfillment,
     proofId,
     guestName: "Ada",
@@ -398,14 +399,86 @@ describe("organizer orders", () => {
     }
   })
 
-  it("uses the same filters for list/export across source pages and backfills pre-component rows idempotently", async () => {
+  it("stores a trimmed optional payment note and leaves an empty note out of history", async () => {
+    const t = test()
+    const setup = await event(t)
+    const noted = await submitted(t, setup, "noted@example.com")
+    await setup.owner.client.mutation(api.organizerOrders.decidePayment, {
+      eventId: setup.eventId,
+      orderId: noted.orderId,
+      decision: "confirmed",
+      note: "  Receipt checked by Ada.  ",
+    })
+    const blank = await submitted(t, setup, "blank-note@example.com")
+    await setup.owner.client.mutation(api.organizerOrders.decidePayment, {
+      eventId: setup.eventId,
+      orderId: blank.orderId,
+      decision: "confirmed",
+      note: "   ",
+    })
+    await t.run(async (ctx) => {
+      const notedHistory = await ctx.db
+        .query("orderStatusHistory")
+        .withIndex("by_orderId_and_createdAt", (q) =>
+          q.eq("orderId", noted.orderId)
+        )
+        .collect()
+      const blankHistory = await ctx.db
+        .query("orderStatusHistory")
+        .withIndex("by_orderId_and_createdAt", (q) =>
+          q.eq("orderId", blank.orderId)
+        )
+        .collect()
+      expect(
+        notedHistory.find((entry) => entry.paymentStatus === "confirmed")?.note
+      ).toBe("Receipt checked by Ada.")
+      expect(
+        blankHistory.find((entry) => entry.paymentStatus === "confirmed")?.note
+      ).toBeUndefined()
+    })
+  })
+
+  it("uses indexed item candidates and keeps cancelled, not drafts, in paginated list/export parity", async () => {
     const t = test()
     const setup = await event(t)
     await t.run(async (ctx) => {
-      await ctx.db.patch(setup.itemId, { inventoryTotal: 30 })
+      await ctx.db.patch(setup.itemId, { inventoryTotal: 60 })
     })
+    const otherItem = await setup.owner.client.mutation(api.items.create, {
+      eventId: setup.eventId,
+      name: "Head tie",
+      unitLabel: "piece",
+      priceMinor: 1000,
+      inventoryTotal: 60,
+    })
+    const targetOrders = []
     for (let index = 0; index < 27; index++)
-      await submitted(t, setup, `page-${index}@example.com`)
+      targetOrders.push(
+        await submitted(t, setup, `target-${index}@example.com`)
+      )
+    // These later orders would occupy the first generic event pages. The
+    // item projection must make the selected item available without scanning
+    // those unrelated order lines first.
+    for (let index = 0; index < 27; index++)
+      await submitted(t, setup, `other-${index}@example.com`, otherItem)
+    await setup.owner.client.mutation(api.organizerOrders.cancel, {
+      eventId: setup.eventId,
+      orderId: targetOrders[0]!.orderId,
+    })
+    const draftGuest = await user(t, "draft@example.com")
+    await draftGuest.client.mutation(api.eventAttendees.startCheckout, {
+      shareToken: setup.shareToken,
+    })
+    const draftId = await draftGuest.client.mutation(api.checkout.saveDraft, {
+      shareToken: setup.shareToken,
+      lines: [{ itemId: setup.itemId, quantity: 1 }],
+      fulfillment: { optionId: setup.optionId, pickupContact: "Ada" },
+      guestName: "Ada",
+      guestPhone: "123",
+    })
+    const draftReference = await t.run(
+      async (ctx) => (await ctx.db.get(draftId))!.reference
+    )
     const listed = await setup.owner.client.query(api.organizerOrders.list, {
       eventId: setup.eventId,
       itemId: setup.itemId,
@@ -423,18 +496,78 @@ describe("organizer orders", () => {
       paginationOpts: { cursor: listed.continueCursor, numItems: 20 },
     })
     expect(second.page).toHaveLength(7)
-    const exported = await setup.owner.client.query(
-      internal.organizerOrders.getExportPage,
-      {
+    const cancelled = await setup.owner.client.query(api.organizerOrders.list, {
+      eventId: setup.eventId,
+      progress: "cancelled",
+      paginationOpts: { cursor: null, numItems: 20 },
+    })
+    expect(cancelled.page.map((order) => order._id)).toEqual([
+      targetOrders[0]!.orderId,
+    ])
+    const listedReferences: string[] = []
+    let listCursor: string | null = null
+    for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+      const page: {
+        page: Array<{ reference: string }>
+        isDone: boolean
+        continueCursor: string
+      } = await setup.owner.client.query(api.organizerOrders.list, {
         eventId: setup.eventId,
-        cursor: null,
-        itemId: setup.itemId,
-        paymentStatus: "pending_review",
-        fulfillmentType: "pickup",
-      }
+        paginationOpts: { cursor: listCursor, numItems: 20 },
+      })
+      listedReferences.push(...page.page.map((order) => order.reference))
+      if (page.isDone) break
+      listCursor = page.continueCursor
+    }
+    expect(listedReferences).toHaveLength(54)
+    expect(listedReferences).not.toContain(draftReference)
+    expect(new Set(listedReferences)).toHaveLength(54)
+    const exportReferences: string[] = []
+    let exportCursor: string | null = null
+    for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+      const exported: {
+        rows: Array<{ reference: string }>
+        isDone: boolean
+        continueCursor: string
+      } = await setup.owner.client.query(
+        internal.organizerOrders.getExportPage,
+        { eventId: setup.eventId, cursor: exportCursor }
+      )
+      exportReferences.push(...exported.rows.map((row) => row.reference))
+      if (exported.isDone) break
+      exportCursor = exported.continueCursor
+    }
+    expect(new Set(exportReferences)).toEqual(new Set(listedReferences))
+    let cancelledExportCursor: string | null = null
+    const cancelledExportReferences: string[] = []
+    for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+      const exported: {
+        rows: Array<{ reference: string }>
+        isDone: boolean
+        continueCursor: string
+      } = await setup.owner.client.query(
+        internal.organizerOrders.getExportPage,
+        {
+          eventId: setup.eventId,
+          cursor: cancelledExportCursor,
+          progress: "cancelled",
+        }
+      )
+      cancelledExportReferences.push(
+        ...exported.rows.map((row) => row.reference)
+      )
+      if (exported.isDone) break
+      cancelledExportCursor = exported.continueCursor
+    }
+    expect(cancelledExportReferences).toEqual(
+      cancelled.page.map((order) => order.reference)
     )
-    expect(exported.rows).toHaveLength(25)
-    expect(exported.isDone).toBe(false)
+  })
+
+  it("backfills pre-component rows idempotently", async () => {
+    const t = test()
+    const setup = await event(t)
+    await submitted(t, setup, "backfill@example.com")
     for (const search of ["x".repeat(121), "x".repeat(160)]) {
       await expect(
         setup.owner.client.query(api.organizerOrders.list, {
