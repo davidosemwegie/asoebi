@@ -24,6 +24,7 @@ import {
 type Detail = {
   order: {
     reference: string
+    lifecycle: string
     guestName: string
     guestEmail?: string
     guestPhone?: string
@@ -96,6 +97,7 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
     return <p className="text-base">This order is not available.</p>
   const { order } = detail
   const action =
+    order.lifecycle === "submitted" &&
     order.paymentStatus === "pending_review" ? (
       <div className="flex flex-wrap gap-3">
         <Button
@@ -128,7 +130,8 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
           Reject payment
         </Button>
       </div>
-    ) : order.paymentStatus === "confirmed" &&
+    ) : order.lifecycle === "submitted" &&
+      order.paymentStatus === "confirmed" &&
       order.progress !== "fulfilled" ? (
       <Button
         className="min-h-12"
@@ -138,7 +141,9 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
       >
         Move to next step
       </Button>
-    ) : order.progress !== "fulfilled" && order.progress !== "cancelled" ? (
+    ) : order.lifecycle === "submitted" &&
+      order.progress !== "fulfilled" &&
+      order.progress !== "cancelled" ? (
       <Button
         variant="destructive"
         className="min-h-12"

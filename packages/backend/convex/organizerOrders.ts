@@ -143,6 +143,7 @@ function summaryOrder(order: Doc<"orders">) {
   return {
     _id: order._id,
     reference: order.reference,
+    lifecycle: order.lifecycle,
     guestName: order.guestName ?? "Guest",
     guestEmail: order.guestEmail,
     guestPhone: order.guestPhone,
@@ -380,7 +381,12 @@ export const getSummary = query({
       paymentsNeedingReview: needsPaymentCheck,
       completedOrders: completed,
       confirmedAwaitingPreparation,
-      needsAttention: needsPaymentCheck + delayed + failed + suppressed,
+      needsAttention:
+        needsPaymentCheck +
+        confirmedAwaitingPreparation +
+        delayed +
+        failed +
+        suppressed,
       items: demand.map(({ item, requested }) => ({
         itemId: item._id,
         name: item.name,

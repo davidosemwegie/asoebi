@@ -4,6 +4,7 @@ import {
   insertLineAggregate,
   insertOrderAggregate,
 } from "./organizerOrderAggregates"
+import { internal } from "./_generated/api"
 import { internalMutation } from "./_generated/server"
 
 /**
@@ -36,6 +37,13 @@ export const backfillPage = internalMutation({
         await insertLineAggregate(ctx, line)
         lines += 1
       }
+    }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.organizerOrderAggregateBackfill.backfillPage,
+        { cursor: page.continueCursor }
+      )
     }
     return {
       continueCursor: page.continueCursor,

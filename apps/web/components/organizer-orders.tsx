@@ -226,10 +226,10 @@ export function OrganizerOrders() {
   return (
     <section className="space-y-5" aria-label="Orders">
       <div className="flex flex-wrap gap-3">
-        <div className="hidden flex-1 gap-3 md:flex">{controls}</div>
+        <div className="hidden flex-1 flex-wrap gap-3 xl:flex">{controls}</div>
         <Sheet>
           <SheetTrigger
-            render={<Button variant="outline" className="min-h-12 md:hidden" />}
+            render={<Button variant="outline" className="min-h-12 xl:hidden" />}
           >
             <FilterIcon aria-hidden="true" />
             Filters
@@ -301,6 +301,13 @@ export function OrganizerOrders() {
               <p>{order.guestName}</p>
               <p>Payment: {order.paymentStatus.replaceAll("_", " ")}</p>
               <p>Progress: {order.progress.replaceAll("_", " ")}</p>
+              <p>
+                Total:{" "}
+                {formatMoney(
+                  order.totalMinor,
+                  order.currency || event.currency
+                )}
+              </p>
               <Button
                 nativeButton={false}
                 className="min-h-12 w-full"

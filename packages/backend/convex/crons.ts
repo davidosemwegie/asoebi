@@ -17,6 +17,13 @@ const internalCheckout = internal as unknown as {
 const crons = cronJobs()
 
 crons.interval(
+  "backfill organizer order aggregates",
+  { hours: 24 },
+  internal.organizerOrderAggregateBackfill.backfillPage,
+  { cursor: null }
+)
+
+crons.interval(
   "clean finalized email bodies",
   { hours: 24 },
   internal.emailCleanup.cleanFinalizedBodies

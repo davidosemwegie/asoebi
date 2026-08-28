@@ -272,17 +272,42 @@ describe("organizer orders", () => {
     await t.run(async (ctx) => {
       expect((await ctx.db.get(setup.itemId))!.reservedQuantity).toBe(0)
     })
+    const replacement = await t.run(async (ctx) => {
+      const stored = await ctx.db.get(order.orderId)
+      const storageId = await ctx.storage.store(new Blob(["new"]))
+      return await ctx.db.insert("paymentProofs", {
+        eventId: setup.eventId,
+        attendeeId: stored!.attendeeId,
+        orderId: order.orderId,
+        storageId,
+        contentType: "application/pdf",
+        size: 3,
+        sha256: "b".repeat(43) + "=",
+        submittedByUserId: order.guest.userId,
+        status: "active",
+        createdAt: Date.now(),
+      })
+    })
+    await order.guest.client.mutation(api.checkout.resubmitRejected, {
+      shareToken: setup.shareToken,
+      requestId: "resubmit-001",
+      lines: [{ itemId: setup.itemId, quantity: 1 }],
+      fulfillment: { optionId: setup.optionId, pickupContact: "Ada" },
+      proofId: replacement,
+      guestName: "Ada",
+      guestPhone: "123",
+    })
     const summary = await setup.owner.client.query(
       api.organizerOrders.getSummary,
       { eventId: setup.eventId }
     )
     expect(summary).toMatchObject({
       submittedOrderCount: 1,
-      paymentsNeedingReview: 0,
+      paymentsNeedingReview: 1,
       currentOrderValueMinor: 1100,
     })
     await t.run(async (ctx) => {
-      expect((await ctx.db.get(setup.itemId))!.reservedQuantity).toBe(0)
+      expect((await ctx.db.get(setup.itemId))!.reservedQuantity).toBe(1)
       const history = await ctx.db
         .query("orderStatusHistory")
         .withIndex("by_orderId_and_createdAt", (q) =>
