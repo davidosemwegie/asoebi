@@ -319,6 +319,26 @@ export const get = query({
             .take(MAX_ORDER_LINES)
         : [],
     ])
+    const selectedOption =
+      order?.fulfillmentOptionId &&
+      !options.some((option) => option._id === order.fulfillmentOptionId)
+        ? await ctx.db.get(order.fulfillmentOptionId)
+        : null
+    const retainedItems =
+      order?.reservationState === "reserved" || order?.lifecycle === "submitted"
+        ? await Promise.all(
+            lines
+              .filter((line) => !items.some((item) => item._id === line.itemId))
+              .map((line) => ctx.db.get(line.itemId))
+          )
+        : []
+    const visibleItems = [
+      ...items,
+      ...retainedItems.filter((item): item is Doc<"items"> => item !== null),
+    ]
+    const visibleOptions = selectedOption
+      ? [...options, selectedOption]
+      : options
     // Only a live reservation should be added back for the attendee editing it.
     // Draft and rejected orders intentionally reserve no inventory.
     const retainedQuantities = new Map(
@@ -338,7 +358,7 @@ export const get = query({
         email: user.email,
         emailVerified: user.emailVerified === true,
       },
-      items: items.map((item) => ({
+      items: visibleItems.map((item) => ({
         _id: item._id,
         name: item.name,
         description: item.description,
@@ -351,7 +371,7 @@ export const get = query({
             (retainedQuantities.get(item._id) ?? 0)
         ),
       })),
-      fulfillmentOptions: options,
+      fulfillmentOptions: visibleOptions,
       paymentInstructions: paymentInstructions?.instructions ?? null,
       order: order
         ? {

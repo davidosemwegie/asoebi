@@ -57,6 +57,17 @@ const labels: Record<OrderStep, string> = {
   payment: "Payment and receipt",
 }
 
+type PendingEdit = {
+  quantities?: Record<string, number>
+  optionId?: string
+  guestName?: string
+  guestPhone?: string
+  details?: Record<string, string>
+  proofId?: string
+  fileName?: string
+  reviewed?: boolean
+}
+
 function requestId() {
   return crypto.randomUUID().replaceAll("-", "")
 }
@@ -164,25 +175,19 @@ export function OrderFlow({
       checkout.order.lifecycle !== "draft" && pendingEditKey
         ? window.localStorage.getItem(pendingEditKey)
         : null
-    const edit = saved
-      ? (JSON.parse(saved) as {
-          quantities?: Record<string, number>
-          optionId?: string
-          guestName?: string
-          guestPhone?: string
-          details?: Record<string, string>
-          proofId?: string
-          fileName?: string
-          reviewed?: boolean
-        })
-      : null
+    let edit: PendingEdit | null = null
+    try {
+      edit = saved ? (JSON.parse(saved) as PendingEdit) : null
+    } catch {
+      if (pendingEditKey) window.localStorage.removeItem(pendingEditKey)
+    }
     setQuantities(edit?.quantities ?? next)
     setOptionId(edit?.optionId ?? checkout.order.fulfillmentOptionId ?? "")
     setGuestName(edit?.guestName ?? checkout.order.guestName ?? "")
     setGuestPhone(edit?.guestPhone ?? checkout.order.guestPhone ?? "")
     setDetails(edit?.details ?? checkout.order.fulfillmentDetails ?? {})
     setFileName(edit?.fileName ?? null)
-    setEditReviewed(edit?.reviewed ?? checkout.order.lifecycle === "draft")
+    setEditReviewed(edit?.reviewed ?? Boolean(checkout.order.reviewedAt))
     setProofId(
       edit?.proofId ??
         (checkout.order.paymentStatus === "rejected"
@@ -287,12 +292,7 @@ export function OrderFlow({
             lines,
             fulfillmentOptionId: optionId,
             guestName,
-            reviewedAt:
-              checkout.order?.lifecycle === "draft"
-                ? checkout.order?.reviewedAt
-                : editReviewed
-                  ? 1
-                  : undefined,
+            reviewedAt: editReviewed ? 1 : undefined,
             fulfillmentRequiredFields: selectedOption?.requiredFields,
             fulfillmentDetails: details,
           })
@@ -306,12 +306,7 @@ export function OrderFlow({
       lines,
       fulfillmentOptionId: optionId,
       guestName,
-      reviewedAt:
-        checkout.order.lifecycle === "draft"
-          ? checkout.order.reviewedAt
-          : editReviewed
-            ? 1
-            : undefined,
+      reviewedAt: editReviewed ? 1 : undefined,
       fulfillmentRequiredFields: selectedOption?.requiredFields,
       fulfillmentDetails: details,
     })

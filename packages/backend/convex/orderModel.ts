@@ -181,10 +181,14 @@ export async function buildOrderSnapshot(
   }> = []
   for (const [itemId, quantity] of quantities) {
     const item = await ctx.db.get(itemId)
-    if (!item || item.eventId !== args.event._id || item.isHidden) {
+    const previous = oldByItem.get(itemId)
+    if (
+      !item ||
+      item.eventId !== args.event._id ||
+      (item.isHidden && (!previous || quantity > previous.quantity))
+    ) {
       throw new ConvexError("One of the selected items is no longer available.")
     }
-    const previous = oldByItem.get(itemId)
     const unitPriceMinor = previous?.unitPriceMinor ?? item.priceMinor
     if (!Number.isSafeInteger(unitPriceMinor) || unitPriceMinor < 0) {
       throw new ConvexError("An item price is not valid.")

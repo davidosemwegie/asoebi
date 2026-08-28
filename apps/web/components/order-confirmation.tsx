@@ -25,13 +25,13 @@ export function OrderConfirmation({
   const router = useRouter()
   const { isAuthenticated, isLoading } = useConvexAuth()
   const data = useQuery(
-    api.orders.getMine,
-    isAuthenticated ? { orderId: orderId as never } : "skip"
+    api.orders.getMineForConfirmation,
+    isAuthenticated ? { orderId } : "skip"
   )
   const valid =
     data &&
-    data.event?.shareToken === shareToken &&
-    data.order.lifecycle === "submitted"
+    data.eventShareToken === shareToken &&
+    data.lifecycle === "submitted"
   useEffect(() => {
     if (!isLoading && (!isAuthenticated || (data !== undefined && !valid))) {
       router.replace(`/e/${shareToken}/order/items`)

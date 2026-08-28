@@ -96,6 +96,24 @@ export const getMine = query({
   },
 })
 
+/** Safe for typed URLs: malformed, foreign, and unavailable orders are null. */
+export const getMineForConfirmation = query({
+  args: { orderId: v.string() },
+  returns: v.any(),
+  handler: async (ctx, { orderId }) => {
+    const user = await authComponent.getAuthUser(ctx)
+    const normalized = ctx.db.normalizeId("orders", orderId)
+    if (!normalized) return null
+    const order = await ctx.db.get(normalized)
+    if (!order || order.userId !== user._id) return null
+    const event = await ctx.db.get(order.eventId)
+    return {
+      lifecycle: order.lifecycle,
+      eventShareToken: event?.shareToken ?? null,
+    }
+  },
+})
+
 /** The only backend projection that may reveal a proof storage id, and only to the owner. */
 export const getReceiptForOwner = internalQuery({
   args: { orderId: v.id("orders") },
