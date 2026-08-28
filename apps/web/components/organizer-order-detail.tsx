@@ -7,6 +7,7 @@ import { LoaderCircleIcon } from "lucide-react"
 
 import { useEventWorkspace } from "@/components/event-workspace"
 import { formatMoney } from "@/lib/money"
+import { optionalPaymentDecisionNote } from "@/lib/organizer-payment-note"
 import { paymentStatusLabel, progressStatusLabel } from "@/lib/order-status"
 import { api } from "@workspace/backend/convex/_generated/api"
 import type { Id } from "@workspace/backend/convex/_generated/dataModel"
@@ -137,7 +138,7 @@ export function OrganizerOrderDetail({ orderId }: { orderId: string }) {
   if (detail === null)
     return <p className="text-base">This order is not available.</p>
   const { order } = detail
-  const normalizedPaymentNote = paymentNote.trim() || undefined
+  const normalizedPaymentNote = optionalPaymentDecisionNote(paymentNote)
   const action =
     order.lifecycle === "submitted" &&
     order.paymentStatus === "pending_review" ? (
