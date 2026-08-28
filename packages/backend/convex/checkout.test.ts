@@ -1,10 +1,11 @@
 /// <reference types="vite/client" />
 
 import betterAuthTest from "@convex-dev/better-auth/test"
+import aggregateTest from "@convex-dev/aggregate/test"
 import { convexTest } from "convex-test"
 import { beforeAll, describe, expect, it, vi } from "vitest"
 
-import { api, components } from "./_generated/api"
+import { api, components, internal } from "./_generated/api"
 import type { Id } from "./_generated/dataModel"
 import schema from "./schema"
 
@@ -23,6 +24,8 @@ beforeAll(() => {
 function test() {
   const t = convexTest(schema, modules)
   betterAuthTest.register(t)
+  aggregateTest.register(t, "invitationDeliveryCounts")
+  aggregateTest.register(t, "invitationActivityCounts")
   return t
 }
 
@@ -103,7 +106,7 @@ async function readyEvent(t: ReturnType<typeof test>) {
     eventId,
     now: Date.now(),
   })
-  return { itemId, optionId, shareToken: event!.shareToken!, owner }
+  return { eventId, itemId, optionId, shareToken: event!.shareToken!, owner }
 }
 
 async function proofFor(
@@ -147,6 +150,42 @@ async function draftFor(
     guestName: "Ada",
   })
   return { guest, orderId, proofId: await proofFor(t, orderId, guest.userId) }
+}
+
+async function submitDraft(
+  t: ReturnType<typeof test>,
+  event: Awaited<ReturnType<typeof readyEvent>>,
+  email: string,
+  requestId: string
+) {
+  const draft = await draftFor(t, event, email)
+  const orderId = await draft.guest.client.mutation(
+    api.checkout.submit,
+    submitArgs(event, draft.proofId, requestId)
+  )
+  return { ...draft, orderId }
+}
+
+async function rejectSubmittedOrder(
+  t: ReturnType<typeof test>,
+  event: Awaited<ReturnType<typeof readyEvent>>,
+  orderId: Id<"orders">
+) {
+  await t.run(async (ctx) => {
+    const order = await ctx.db.get(orderId)
+    if (!order) throw new Error("missing order")
+    const item = await ctx.db.get(event.itemId)
+    if (!item) throw new Error("missing item")
+    await ctx.db.patch(orderId, {
+      paymentStatus: "rejected",
+      reservationState: "released",
+      updatedAt: Date.now(),
+    })
+    await ctx.db.patch(item._id, {
+      reservedQuantity: 0,
+      updatedAt: Date.now(),
+    })
+  })
 }
 
 function submitArgs(
@@ -218,6 +257,14 @@ describe("guest checkout", () => {
         submitArgs(event, proofId, "unverified-submit")
       )
     ).rejects.toThrow("Verify your email")
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(0)
+      expect(await ctx.db.get(checkout!.order!._id)).toMatchObject({
+        lifecycle: "draft",
+        paymentStatus: "not_submitted",
+        reservationState: "none",
+      })
+    })
   })
 
   it("submits once, reserves atomically, and replays a canonically equivalent request", async () => {
@@ -469,6 +516,55 @@ describe("guest checkout", () => {
     ).rejects.toThrow("no longer accepting")
   })
 
+  it("keeps existing orders readable after the exact deadline while blocking every guest write path", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const draft = await draftFor(t, event, "expired@example.com")
+    const orderId = await draft.guest.client.mutation(
+      api.checkout.submit,
+      submitArgs(event, draft.proofId, "expired-submit")
+    )
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.eventId, {
+        orderDeadlineAt: Date.now() - 1,
+        updatedAt: Date.now(),
+      })
+    })
+    expect(
+      await draft.guest.client.query(api.orders.getMine, { orderId })
+    ).toMatchObject({ order: { _id: orderId, lifecycle: "submitted" } })
+    await expect(
+      draft.guest.client.mutation(api.checkout.saveDraft, {
+        shareToken: event.shareToken,
+        lines: [{ itemId: event.itemId, quantity: 1 }],
+      })
+    ).rejects.toThrow("no longer accepting")
+    await expect(
+      draft.guest.client.mutation(api.checkout.updatePending, {
+        ...submitArgs(event, draft.proofId, "expired-update"),
+      })
+    ).rejects.toThrow("no longer accepting")
+    await expect(
+      draft.guest.client.mutation(api.checkout.cancelMine, {
+        shareToken: event.shareToken,
+        requestId: "expired-cancel",
+      })
+    ).rejects.toThrow("no longer accepting")
+    const replacementProof = await proofFor(t, orderId, draft.guest.userId)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(orderId, {
+        paymentStatus: "rejected",
+        reservationState: "released",
+      })
+      await ctx.db.patch(event.itemId, { reservedQuantity: 0 })
+    })
+    await expect(
+      draft.guest.client.mutation(api.checkout.resubmitRejected, {
+        ...submitArgs(event, replacementProof, "expired-resubmit"),
+      })
+    ).rejects.toThrow("no longer accepting")
+  })
+
   it("bounds guest contact input before a draft or update write", async () => {
     const t = test()
     const event = await readyEvent(t)
@@ -507,5 +603,565 @@ describe("guest checkout", () => {
       paginationOpts: { numItems: 10, cursor: null },
     })
     expect(page.page.map((entry) => entry._id)).not.toContain(orderId)
+  })
+
+  it("keeps captured item prices and pickup fees while charging current prices and fees for new choices", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const addedItemId = await event.owner.client.mutation(api.items.create, {
+      eventId: event.eventId,
+      name: "Cap",
+      unitLabel: "piece",
+      priceMinor: 3_000,
+      inventoryTotal: 4,
+    })
+    const deliveryOptionId = await event.owner.client.mutation(
+      api.eventSetup.createFulfillmentOption,
+      {
+        eventId: event.eventId,
+        name: "Home delivery",
+        type: "delivery",
+        feeMinor: 2_500,
+        instructions: "We will call before delivery.",
+        enabled: true,
+        requiredFields: {
+          kind: "delivery",
+          recipientName: false,
+          phoneNumber: false,
+          address: false,
+          availability: false,
+          notes: false,
+        },
+      }
+    )
+    const submitted = await submitDraft(
+      t,
+      event,
+      "prices@example.com",
+      "submit-prices"
+    )
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.itemId, { priceMinor: 99_000 })
+      await ctx.db.patch(addedItemId, { priceMinor: 4_000 })
+    })
+    const replacementProof = await proofFor(
+      t,
+      submitted.orderId,
+      submitted.guest.userId
+    )
+    await submitted.guest.client.mutation(api.checkout.updatePending, {
+      shareToken: event.shareToken,
+      requestId: "update-prices-and-option",
+      lines: [
+        { itemId: event.itemId, quantity: 1 },
+        { itemId: addedItemId, quantity: 1 },
+      ],
+      fulfillment: { optionId: deliveryOptionId },
+      proofId: replacementProof,
+      guestName: "Ada",
+    })
+    await t.run(async (ctx) => {
+      const order = await ctx.db.get(submitted.orderId)
+      const lines = await ctx.db
+        .query("orderLines")
+        .withIndex("by_orderId", (q) => q.eq("orderId", submitted.orderId))
+        .take(10)
+      expect(order).toMatchObject({
+        itemSubtotalMinor: 14_000,
+        fulfillmentFeeMinor: 2_500,
+        totalMinor: 16_500,
+        fulfillmentOptionId: deliveryOptionId,
+      })
+      expect(lines).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            itemId: event.itemId,
+            unitPriceMinor: 10_000,
+          }),
+          expect.objectContaining({
+            itemId: addedItemId,
+            unitPriceMinor: 4_000,
+          }),
+        ])
+      )
+      expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(1)
+      expect((await ctx.db.get(addedItemId))!.reservedQuantity).toBe(1)
+    })
+  })
+
+  it("allows reducing a hidden retained line but blocks increasing it, and preserves a disabled selected option's captured terms", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.itemId, { inventoryTotal: 2 })
+    })
+    const guest = await user(t, "retained@example.com")
+    await guest.client.mutation(api.eventAttendees.startCheckout, {
+      shareToken: event.shareToken,
+    })
+    const orderId = await guest.client.mutation(api.checkout.saveDraft, {
+      shareToken: event.shareToken,
+      lines: [{ itemId: event.itemId, quantity: 2 }],
+      fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+      guestName: "Ada",
+    })
+    const proofId = await proofFor(t, orderId, guest.userId)
+    await guest.client.mutation(api.checkout.submit, {
+      shareToken: event.shareToken,
+      requestId: "submit-retained",
+      lines: [{ itemId: event.itemId, quantity: 2 }],
+      fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+      proofId,
+      guestName: "Ada",
+    })
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.itemId, { isHidden: true })
+      await ctx.db.patch(event.optionId, {
+        enabled: false,
+        feeMinor: 9_999,
+        instructions: "Changed live instructions",
+      })
+    })
+    const replacementProof = await proofFor(t, orderId, guest.userId)
+    await guest.client.mutation(api.checkout.updatePending, {
+      shareToken: event.shareToken,
+      requestId: "reduce-hidden-line",
+      lines: [{ itemId: event.itemId, quantity: 1 }],
+      fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+      proofId: replacementProof,
+      guestName: "Ada",
+    })
+    await t.run(async (ctx) => {
+      expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(1)
+    })
+    await expect(
+      guest.client.mutation(api.checkout.updatePending, {
+        shareToken: event.shareToken,
+        requestId: "increase-hidden-line",
+        lines: [{ itemId: event.itemId, quantity: 2 }],
+        fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+        guestName: "Ada",
+      })
+    ).rejects.toThrow("no longer available")
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get(orderId)).toMatchObject({
+        fulfillmentFeeMinor: 500,
+        fulfillmentInstructions: "Bring ID",
+      })
+    })
+  })
+
+  it("reports only current availability for a hidden rejected line after another order consumes the released stock", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.itemId, { inventoryTotal: 3 })
+    })
+    const firstGuest = await user(t, "availability-first@example.com")
+    await firstGuest.client.mutation(api.eventAttendees.startCheckout, {
+      shareToken: event.shareToken,
+    })
+    const firstOrderId = await firstGuest.client.mutation(
+      api.checkout.saveDraft,
+      {
+        shareToken: event.shareToken,
+        lines: [{ itemId: event.itemId, quantity: 2 }],
+        fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+        guestName: "Ada",
+      }
+    )
+    const firstProof = await proofFor(t, firstOrderId, firstGuest.userId)
+    await firstGuest.client.mutation(api.checkout.submit, {
+      shareToken: event.shareToken,
+      requestId: "availability-first-submit",
+      lines: [{ itemId: event.itemId, quantity: 2 }],
+      fulfillment: { optionId: event.optionId, pickupContact: "Ada" },
+      proofId: firstProof,
+      guestName: "Ada",
+    })
+    await rejectSubmittedOrder(t, event, firstOrderId)
+    const secondGuest = await user(t, "availability-second@example.com")
+    await secondGuest.client.mutation(api.eventAttendees.startCheckout, {
+      shareToken: event.shareToken,
+    })
+    const secondOrderId = await secondGuest.client.mutation(
+      api.checkout.saveDraft,
+      {
+        shareToken: event.shareToken,
+        lines: [{ itemId: event.itemId, quantity: 3 }],
+        fulfillment: { optionId: event.optionId, pickupContact: "Bola" },
+        guestName: "Bola",
+      }
+    )
+    const secondProof = await proofFor(t, secondOrderId, secondGuest.userId)
+    await secondGuest.client.mutation(api.checkout.submit, {
+      shareToken: event.shareToken,
+      requestId: "availability-second-submit",
+      lines: [{ itemId: event.itemId, quantity: 3 }],
+      fulfillment: { optionId: event.optionId, pickupContact: "Bola" },
+      proofId: secondProof,
+      guestName: "Bola",
+    })
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.itemId, { isHidden: true })
+    })
+    const checkout = await firstGuest.client.query(api.checkout.get, {
+      shareToken: event.shareToken,
+    })
+    expect(
+      checkout!.items.find((item) => item._id === event.itemId)
+        ?.availableQuantity
+    ).toBe(0)
+  })
+
+  it("requires required fulfillment details before submission", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const draft = await draftFor(t, event, "details@example.com")
+    await expect(
+      draft.guest.client.mutation(api.checkout.submit, {
+        shareToken: event.shareToken,
+        requestId: "missing-pickup-contact",
+        lines: [{ itemId: event.itemId, quantity: 1 }],
+        fulfillment: { optionId: event.optionId },
+        proofId: draft.proofId,
+        guestName: "Ada",
+      })
+    ).rejects.toThrow("pickup contact")
+  })
+
+  it("requires a new proof and fresh inventory reservation when a rejected order is resubmitted", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const submitted = await submitDraft(
+      t,
+      event,
+      "rejected@example.com",
+      "submit-rejected"
+    )
+    await rejectSubmittedOrder(t, event, submitted.orderId)
+    await expect(
+      submitted.guest.client.mutation(api.checkout.resubmitRejected, {
+        ...submitArgs(event, submitted.proofId, "same-proof-rejected"),
+      })
+    ).rejects.toThrow("new payment receipt")
+    const replacementProof = await proofFor(
+      t,
+      submitted.orderId,
+      submitted.guest.userId
+    )
+    await submitted.guest.client.mutation(api.checkout.resubmitRejected, {
+      ...submitArgs(event, replacementProof, "new-proof-rejected"),
+    })
+    await t.mutation(internal.checkout.afterSubmit, {
+      orderId: submitted.orderId,
+    })
+    await t.run(async (ctx) => {
+      const order = await ctx.db.get(submitted.orderId)
+      const history = await ctx.db
+        .query("orderStatusHistory")
+        .withIndex("by_orderId_and_createdAt", (q) =>
+          q.eq("orderId", submitted.orderId)
+        )
+        .take(10)
+      const notifications = await ctx.db
+        .query("notifications")
+        .withIndex("by_orderRef_and_updatedAt", (q) =>
+          q.eq("orderRef", `${submitted.orderId}`)
+        )
+        .take(10)
+      expect(order).toMatchObject({
+        paymentStatus: "pending_review",
+        reservationState: "reserved",
+        currentProofId: replacementProof,
+      })
+      expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(1)
+      expect(
+        history.some((entry) => entry.paymentStatus === "pending_review")
+      ).toBe(true)
+      expect(
+        notifications.some(
+          (entry) => entry.templateKind === "guest_order_submitted"
+        )
+      ).toBe(true)
+    })
+  })
+
+  it("limits proof-upload claims, rejects uploads after confirmation, and does not let a foreign caller consume a claim", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const draft = await draftFor(t, event, "claims@example.com")
+    const claimArgs = {
+      shareToken: event.shareToken,
+      contentType: "application/pdf",
+      size: 8,
+      sha256: "a".repeat(43) + "=",
+    }
+    const first = await draft.guest.client.mutation(
+      api.checkout.generateProofUploadUrl,
+      claimArgs
+    )
+    await draft.guest.client.mutation(
+      api.checkout.generateProofUploadUrl,
+      claimArgs
+    )
+    await draft.guest.client.mutation(
+      api.checkout.generateProofUploadUrl,
+      claimArgs
+    )
+    await expect(
+      draft.guest.client.mutation(
+        api.checkout.generateProofUploadUrl,
+        claimArgs
+      )
+    ).rejects.toThrow("existing receipt uploads")
+    const intruder = await user(t, "intruder@example.com")
+    const storageId = await t.run((ctx) =>
+      ctx.storage.store(
+        new Blob(["not a receipt"], { type: "application/pdf" })
+      )
+    )
+    const result = await intruder.client.mutation(
+      internal.checkout.finalizeProofUpload,
+      { claimId: first.claimId, storageId, signatureValid: false }
+    )
+    expect(result.ok).toBe(false)
+    await t.run(async (ctx) => {
+      expect(await ctx.db.get(first.claimId)).not.toBeNull()
+    })
+    await t.run(async (ctx) => {
+      await ctx.db.patch(draft.orderId, {
+        lifecycle: "submitted",
+        paymentStatus: "confirmed",
+      })
+    })
+    await expect(
+      draft.guest.client.mutation(
+        api.checkout.generateProofUploadUrl,
+        claimArgs
+      )
+    ).rejects.toThrow("cannot accept another payment receipt")
+  })
+
+  it("matches a verified invitation without gating an uninvited order, and records invitation submission activity", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const invitation = await event.owner.client.mutation(
+      api.eventInvitations.add,
+      {
+        eventId: event.eventId,
+        name: "Invited Ada",
+        email: " INVITED@EXAMPLE.COM ",
+      }
+    )
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.itemId, { inventoryTotal: 2 })
+    })
+    const invited = await submitDraft(
+      t,
+      event,
+      "invited@example.com",
+      "submit-invited"
+    )
+    const uninvited = await submitDraft(
+      t,
+      event,
+      "not-invited@example.com",
+      "submit-uninvited"
+    )
+    await t.finishInProgressScheduledFunctions()
+    await t.run(async (ctx) => {
+      const storedInvitation = await ctx.db.get(invitation._id)
+      expect(storedInvitation).toMatchObject({
+        matchedUserId: invited.guest.userId,
+        orderId: `${invited.orderId}`,
+        activity: "order_submitted",
+      })
+      const noInvitation = await ctx.db
+        .query("eventInvitations")
+        .withIndex("by_eventId_and_normalizedEmail", (q) =>
+          q
+            .eq("eventId", event.eventId)
+            .eq("normalizedEmail", "not-invited@example.com")
+        )
+        .unique()
+      expect(noInvitation).toBeNull()
+      expect(await ctx.db.get(uninvited.orderId)).toMatchObject({
+        lifecycle: "submitted",
+      })
+    })
+  })
+
+  it("serves a submitted receipt to its event owner only and keeps the cancelled proof attached without releasing twice", async () => {
+    const t = test()
+    const event = await readyEvent(t)
+    const submitted = await submitDraft(
+      t,
+      event,
+      "receipt-owner@example.com",
+      "submit-receipt-owner"
+    )
+    const outsider = await user(t, "not-owner@example.com")
+    expect(
+      await event.owner.client.query(internal.orders.getReceiptForOwner, {
+        orderId: submitted.orderId,
+      })
+    ).toMatchObject({ reference: expect.stringMatching(/^ASO-/) })
+    expect(
+      await outsider.client.query(internal.orders.getReceiptForOwner, {
+        orderId: submitted.orderId,
+      })
+    ).toBeNull()
+    await submitted.guest.client.mutation(api.checkout.cancelMine, {
+      shareToken: event.shareToken,
+      requestId: "cancel-receipt-invariant",
+    })
+    await t.run(async (ctx) => {
+      const order = await ctx.db.get(submitted.orderId)
+      const proof = await ctx.db.get(submitted.proofId)
+      expect(order).toMatchObject({
+        lifecycle: "cancelled",
+        reservationState: "released",
+        currentProofId: submitted.proofId,
+      })
+      expect(proof).toMatchObject({
+        orderId: submitted.orderId,
+        status: "active",
+      })
+      expect((await ctx.db.get(event.itemId))!.reservedQuantity).toBe(0)
+    })
+  })
+
+  it("scavenges aged orphan storage while preserving referenced covers, proofs, and active upload claims", async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"))
+      const t = test()
+      const event = await readyEvent(t)
+      const draft = await draftFor(t, event, "scavenge@example.com")
+      const ids = await t.run(async (ctx) => {
+        const orphan = await ctx.storage.store(
+          new Blob(["orphan"], { type: "application/pdf" })
+        )
+        const cover = await ctx.storage.store(
+          new Blob(["cover"], { type: "image/jpeg" })
+        )
+        const claimed = await ctx.storage.store(
+          new Blob(["claimed"], { type: "application/pdf" })
+        )
+        const order = await ctx.db.get(draft.orderId)
+        if (!order) throw new Error("missing order")
+        await ctx.db.patch(event.eventId, { coverStorageId: cover })
+        await ctx.db.insert("proofUploadClaims", {
+          eventId: event.eventId,
+          attendeeId: order.attendeeId,
+          orderId: order._id,
+          uploaderUserId: draft.guest.userId,
+          contentType: "application/pdf",
+          size: 7,
+          sha256: "a".repeat(43) + "=",
+          storageId: claimed,
+          expiresAt: Date.now() + 30 * 60 * 1_000,
+        })
+        const proof = await ctx.db.get(draft.proofId)
+        if (!proof) throw new Error("missing proof")
+        return { orphan, cover, claimed, proof: proof.storageId }
+      })
+      vi.setSystemTime(new Date("2030-01-01T00:16:00.000Z"))
+      const result = await t.mutation(
+        internal.checkout.cleanExpiredOrderArtifacts,
+        {}
+      )
+      expect(result.orphans).toBeGreaterThanOrEqual(1)
+      await t.run(async (ctx) => {
+        expect(await ctx.db.system.get("_storage", ids.orphan)).toBeNull()
+        expect(await ctx.db.system.get("_storage", ids.cover)).not.toBeNull()
+        expect(await ctx.db.system.get("_storage", ids.proof)).not.toBeNull()
+        expect(await ctx.db.system.get("_storage", ids.claimed)).not.toBeNull()
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("deletes an expired recorded claim without deleting storage still referenced by both a proof and cover", async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date("2030-02-01T00:00:00.000Z"))
+      const t = test()
+      const event = await readyEvent(t)
+      const draft = await draftFor(t, event, "expired-claim@example.com")
+      const claimId = await t.run(async (ctx) => {
+        const proof = await ctx.db.get(draft.proofId)
+        const order = await ctx.db.get(draft.orderId)
+        if (!proof || !order) throw new Error("missing proof or order")
+        await ctx.db.patch(event.eventId, { coverStorageId: proof.storageId })
+        return await ctx.db.insert("proofUploadClaims", {
+          eventId: event.eventId,
+          attendeeId: order.attendeeId,
+          orderId: order._id,
+          uploaderUserId: draft.guest.userId,
+          contentType: proof.contentType,
+          size: proof.size,
+          sha256: proof.sha256,
+          storageId: proof.storageId,
+          expiresAt: Date.now() - 1,
+        })
+      })
+      const result = await t.mutation(
+        internal.checkout.cleanExpiredOrderArtifacts,
+        {}
+      )
+      expect(result.claims).toBe(1)
+      await t.run(async (ctx) => {
+        const proof = await ctx.db.get(draft.proofId)
+        expect(await ctx.db.get(claimId)).toBeNull()
+        expect(
+          await ctx.db.system.get("_storage", proof!.storageId)
+        ).not.toBeNull()
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps a young orphan through a completed cursor cycle, then deletes it after it ages", async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date("2030-03-01T00:00:00.000Z"))
+      const t = test()
+      const event = await readyEvent(t)
+      const youngOrphan = await t.run((ctx) =>
+        ctx.storage.store(
+          new Blob(["young orphan"], { type: "application/pdf" })
+        )
+      )
+      const first = await t.mutation(
+        internal.checkout.cleanExpiredOrderArtifacts,
+        {}
+      )
+      expect(first.orphans).toBe(0)
+      await t.run(async (ctx) => {
+        const cursor = await ctx.db
+          .query("storageScavengerCursors")
+          .withIndex("by_name", (q) => q.eq("name", "payment-proof-orphans"))
+          .unique()
+        expect(cursor?.cursor).toBeUndefined()
+        expect(await ctx.db.system.get("_storage", youngOrphan)).not.toBeNull()
+      })
+      vi.setSystemTime(new Date("2030-03-01T00:16:00.000Z"))
+      const second = await t.mutation(
+        internal.checkout.cleanExpiredOrderArtifacts,
+        {}
+      )
+      expect(second.orphans).toBeGreaterThanOrEqual(1)
+      await t.run(async (ctx) => {
+        expect(await ctx.db.system.get("_storage", youngOrphan)).toBeNull()
+      })
+      // `event` is intentionally retained to ensure the cycle ignores unrelated rows.
+      expect(event.eventId).toBeDefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

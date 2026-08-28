@@ -3,9 +3,14 @@
 import Link from "next/link"
 import { useState } from "react"
 import { useMutation, useQuery } from "convex/react"
-import { CircleAlertIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  CircleAlertIcon,
+  LoaderCircleIcon,
+} from "lucide-react"
 
 import { formatMoney } from "@/lib/money"
+import { canGuestCancelOrder } from "@/lib/order-step-guards"
 import { api } from "@workspace/backend/convex/_generated/api"
 import {
   Alert,
@@ -13,6 +18,16 @@ import {
   AlertTitle,
 } from "@workspace/ui/components/alert"
 import { Button } from "@workspace/ui/components/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@workspace/ui/components/alert-dialog"
 import {
   Card,
   CardContent,
@@ -39,6 +54,8 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   const data = useQuery(api.orders.getMine, { orderId })
   const cancel = useMutation(api.checkout.cancelMine)
   const [error, setError] = useState<string | null>(null)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [isCancelling, setIsCancelling] = useState(false)
   if (data === undefined)
     return (
       <main className="mx-auto max-w-3xl px-4 py-8 text-base">
@@ -52,12 +69,33 @@ export function OrderDetail({ orderId }: { orderId: string }) {
       </main>
     )
   const { order, event, lines, history } = data
-  const canCancel =
-    order.lifecycle === "submitted" &&
-    order.paymentStatus === "pending_review" &&
-    event?.orderingOpen
+  const canCancel = canGuestCancelOrder({
+    lifecycle: order.lifecycle,
+    paymentStatus: order.paymentStatus,
+    orderingOpen: Boolean(event?.orderingOpen),
+  })
+  const cancelled =
+    order.lifecycle === "cancelled" || order.progress === "cancelled"
+
+  const cancelOrder = async () => {
+    if (!event?.shareToken || isCancelling) return
+    setError(null)
+    setIsCancelling(true)
+    try {
+      await cancel({
+        shareToken: event.shareToken,
+        requestId: crypto.randomUUID().replaceAll("-", ""),
+      })
+      window.sessionStorage.removeItem(`asoebi:order-edit:${order._id}`)
+      setCancelOpen(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Try again.")
+    } finally {
+      setIsCancelling(false)
+    }
+  }
   return (
-    <main className="mx-auto max-w-3xl space-y-6 px-4 py-8 text-base">
+    <main className="mx-auto max-w-3xl space-y-6 px-4 py-8 text-lg">
       <header>
         <h1 className="font-heading text-3xl font-semibold">
           Order {order.reference}
@@ -69,6 +107,16 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           <CircleAlertIcon aria-hidden="true" />
           <AlertTitle>Could not cancel</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {cancelled ? (
+        <Alert aria-live="polite">
+          <CheckCircle2Icon aria-hidden="true" />
+          <AlertTitle>Order cancelled</AlertTitle>
+          <AlertDescription>
+            This order has been cancelled. The organizer will handle any payment
+            arrangements outside Asoebi.
+          </AlertDescription>
         </Alert>
       ) : null}
       <Card>
@@ -131,21 +179,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         <Button
           variant="destructive"
           className="min-h-12"
-          onClick={() => {
-            if (!event?.shareToken) return
-            void cancel({
-              shareToken: event.shareToken,
-              requestId: crypto.randomUUID().replaceAll("-", ""),
-            })
-              .then(() =>
-                window.sessionStorage.removeItem(
-                  `asoebi:order-edit:${order._id}`
-                )
-              )
-              .catch((cause) =>
-                setError(cause instanceof Error ? cause.message : "Try again.")
-              )
-          }}
+          onClick={() => setCancelOpen(true)}
         >
           Cancel order
         </Button>
@@ -172,6 +206,43 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           Update and resubmit
         </Button>
       ) : null}
+      <AlertDialog
+        open={cancelOpen}
+        onOpenChange={(open) => {
+          if (!isCancelling) setCancelOpen(open)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl">
+              Cancel order {order.reference}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-lg">
+              This releases the items set aside for your order. Any payment
+              arrangement is handled with the organizer outside Asoebi.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className="min-h-11 px-4 text-lg"
+              disabled={isCancelling}
+            >
+              Keep order
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              className="min-h-11 px-4 text-lg"
+              disabled={isCancelling}
+              onClick={() => void cancelOrder()}
+            >
+              {isCancelling ? (
+                <LoaderCircleIcon className="animate-spin" aria-hidden="true" />
+              ) : null}
+              {isCancelling ? "Cancelling…" : "Cancel order"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   )
 }

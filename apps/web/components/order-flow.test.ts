@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  canGuestCancelOrder,
   earliestIncompleteStep,
   missingRequiredFulfillmentFields,
+  unreservedQuantityAvailabilityIssues,
 } from "../lib/order-step-guards"
 
 describe("guest order step guards", () => {
@@ -27,6 +29,82 @@ describe("guest order step guards", () => {
         reviewedAt: 1,
       })
     ).toBe("payment")
+  })
+
+  it("holds unreserved draft and rejected orders at items when stock changes", () => {
+    const items = [
+      {
+        _id: "item-a",
+        name: "Blue fabric",
+        availableQuantity: 2,
+      },
+      {
+        _id: "item-b",
+        name: "Cap",
+        availableQuantity: 5,
+      },
+    ]
+    const quantities = { "item-a": 4, "item-b": 2 }
+    const draftIssues = unreservedQuantityAvailabilityIssues({
+      items,
+      quantities,
+      reservationState: "none",
+    })
+    const rejectedIssues = unreservedQuantityAvailabilityIssues({
+      items,
+      quantities,
+      reservationState: "released",
+    })
+
+    expect(draftIssues).toEqual([
+      {
+        itemId: "item-a",
+        itemName: "Blue fabric",
+        selectedQuantity: 4,
+        availableQuantity: 2,
+      },
+    ])
+    expect(rejectedIssues).toEqual(draftIssues)
+    expect(
+      unreservedQuantityAvailabilityIssues({
+        items,
+        quantities,
+        reservationState: "reserved",
+      })
+    ).toEqual([])
+    expect(
+      earliestIncompleteStep({
+        lines: [{}],
+        hasQuantityExceedingAvailability: draftIssues.length > 0,
+        fulfillmentOptionId: "option",
+        guestName: "Ada",
+        reviewedAt: 1,
+      })
+    ).toBe("items")
+  })
+
+  it("only enables order cancellation while payment is waiting for review and ordering remains open", () => {
+    expect(
+      canGuestCancelOrder({
+        lifecycle: "submitted",
+        paymentStatus: "pending_review",
+        orderingOpen: true,
+      })
+    ).toBe(true)
+    expect(
+      canGuestCancelOrder({
+        lifecycle: "submitted",
+        paymentStatus: "confirmed",
+        orderingOpen: true,
+      })
+    ).toBe(false)
+    expect(
+      canGuestCancelOrder({
+        lifecycle: "submitted",
+        paymentStatus: "pending_review",
+        orderingOpen: false,
+      })
+    ).toBe(false)
   })
 
   it("holds direct review and payment links at details until configured fields are complete", () => {

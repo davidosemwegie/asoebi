@@ -47,14 +47,73 @@ export function missingRequiredFulfillmentFields(
   ].filter((field): field is string => field !== null)
 }
 
+export function quantitiesOverAvailability(
+  items: Array<{
+    _id: string
+    name: string
+    availableQuantity: number
+  }>,
+  quantities: Record<string, number>
+) {
+  return items.flatMap((item) => {
+    const selectedQuantity = quantities[item._id] ?? 0
+    return selectedQuantity > item.availableQuantity
+      ? [
+          {
+            itemId: item._id,
+            itemName: item.name,
+            selectedQuantity,
+            availableQuantity: item.availableQuantity,
+          },
+        ]
+      : []
+  })
+}
+
+export function unreservedQuantityAvailabilityIssues({
+  items,
+  quantities,
+  reservationState,
+}: {
+  items: Array<{
+    _id: string
+    name: string
+    availableQuantity: number
+  }>
+  quantities: Record<string, number>
+  reservationState: string | undefined
+}) {
+  return reservationState === "reserved"
+    ? []
+    : quantitiesOverAvailability(items, quantities)
+}
+
+export function canGuestCancelOrder({
+  lifecycle,
+  paymentStatus,
+  orderingOpen,
+}: {
+  lifecycle: string
+  paymentStatus: string
+  orderingOpen: boolean
+}) {
+  return (
+    lifecycle === "submitted" &&
+    paymentStatus === "pending_review" &&
+    orderingOpen
+  )
+}
+
 export function earliestIncompleteStep(order: {
   lines: Array<unknown>
+  hasQuantityExceedingAvailability?: boolean
   fulfillmentOptionId?: unknown
   guestName?: string
   reviewedAt?: number
   fulfillmentRequiredFields?: RequiredFields
   fulfillmentDetails?: FulfillmentDetails
 }) {
+  if (order.hasQuantityExceedingAvailability) return "items" as const
   if (order.lines.length === 0) return "items" as const
   if (!order.fulfillmentOptionId) return "fulfillment" as const
   if (!order.guestName) return "details" as const

@@ -20,6 +20,7 @@ import {
   type OrderLineInput,
 } from "./orderModel"
 import { authComponent } from "./auth"
+import { isCanonicalSha256Base64, sha256ValuesEqual } from "./fileDigests"
 import { internal } from "./_generated/api"
 import type { Doc, Id } from "./_generated/dataModel"
 import {
@@ -207,6 +208,48 @@ async function requireProof(
     throw new ConvexError("Upload a valid payment receipt before submitting.")
   }
   return proof
+}
+
+/**
+ * A storage ID is private data, but it is still an identifier supplied by the
+ * browser after a direct upload. Do not let a receipt claim adopt a file that
+ * has already been committed elsewhere. `take(2)` is intentional: legacy data
+ * can contain duplicate claim references, so `unique()` would make the cleanup
+ * path fail instead of treating the file as in use.
+ */
+async function hasConflictingStorageReference(
+  ctx: MutationCtx,
+  storageId: Id<"_storage">,
+  claimId?: Id<"proofUploadClaims">
+) {
+  const [proof, cover, claims] = await Promise.all([
+    ctx.db
+      .query("paymentProofs")
+      .withIndex("by_storageId", (q) => q.eq("storageId", storageId))
+      .first(),
+    ctx.db
+      .query("events")
+      .withIndex("by_coverStorageId", (q) => q.eq("coverStorageId", storageId))
+      .first(),
+    ctx.db
+      .query("proofUploadClaims")
+      .withIndex("by_storageId", (q) => q.eq("storageId", storageId))
+      .take(2),
+  ])
+  return Boolean(
+    proof || cover || claims.some((claim) => claim._id !== claimId)
+  )
+}
+
+async function deleteClaimAndUnreferencedStorage(
+  ctx: MutationCtx,
+  claim: Doc<"proofUploadClaims">
+) {
+  const canDeleteStorage =
+    claim.storageId !== undefined &&
+    !(await hasConflictingStorageReference(ctx, claim.storageId, claim._id))
+  if (canDeleteStorage) await ctx.storage.delete(claim.storageId!)
+  await ctx.db.delete(claim._id)
 }
 
 async function checkReceipt(
@@ -400,22 +443,30 @@ export const get = query({
         email: user.email,
         emailVerified: user.emailVerified === true,
       },
-      items: visibleItems.map((item) => ({
-        _id: item._id,
-        name: item.name,
-        description: item.description,
-        unitLabel: item.unitLabel,
-        priceMinor: item.priceMinor,
-        availableQuantity:
-          item.isHidden && capturedQuantities.has(item._id)
-            ? capturedQuantities.get(item._id)!
-            : Math.max(
-                0,
-                item.inventoryTotal -
-                  item.reservedQuantity +
-                  (retainedQuantities.get(item._id) ?? 0)
-              ),
-      })),
+      items: visibleItems.map((item) => {
+        const availableQuantity = Math.max(
+          0,
+          item.inventoryTotal -
+            item.reservedQuantity +
+            (retainedQuantities.get(item._id) ?? 0)
+        )
+        const capturedQuantity = capturedQuantities.get(item._id)
+        return {
+          _id: item._id,
+          name: item.name,
+          description: item.description,
+          unitLabel: item.unitLabel,
+          priceMinor: item.priceMinor,
+          // A hidden submitted item remains visible to its existing guest, but
+          // it cannot offer more than their captured line. Rejected orders have
+          // no reservation to add back, so this also reflects stock consumed
+          // by other guests after the rejection.
+          availableQuantity:
+            item.isHidden && capturedQuantity !== undefined
+              ? Math.min(capturedQuantity, availableQuantity)
+              : availableQuantity,
+        }
+      }),
       fulfillmentOptions: visibleOptions,
       paymentInstructions: paymentInstructions?.instructions ?? null,
       order: order
@@ -966,7 +1017,7 @@ export const generateProofUploadUrl = mutation({
       args.size > MAX_PROOF_BYTES
     )
       throw new ConvexError("Use a payment receipt no larger than 10 MB.")
-    if (!/^[A-Za-z0-9+/]{43}=$/.test(args.sha256))
+    if (!isCanonicalSha256Base64(args.sha256))
       throw new ConvexError("The receipt fingerprint is invalid.")
     const now = Date.now()
     const claims = await ctx.db
@@ -1031,7 +1082,7 @@ export const inspectProofUpload = internalQuery({
       !metadata ||
       metadata._creationTime <= claim._creationTime ||
       metadata._creationTime > claim.expiresAt ||
-      metadata.sha256 !== claim.sha256 ||
+      !sha256ValuesEqual(metadata.sha256, claim.sha256) ||
       metadata.size !== claim.size ||
       metadata.contentType !== claim.contentType ||
       !PROOF_TYPES.has(metadata.contentType)
@@ -1055,13 +1106,32 @@ export const recordProofUpload = internalMutation({
   handler: async (ctx, args) => {
     const user = await authComponent.getAuthUser(ctx)
     const claim = await ctx.db.get(args.claimId)
+    const metadata = await ctx.db.system.get("_storage", args.storageId)
+    const order = claim ? await ctx.db.get(claim.orderId) : null
     if (
       !claim ||
       claim.uploaderUserId !== user._id ||
-      claim.expiresAt < Date.now()
+      claim.expiresAt <= Date.now() ||
+      !order ||
+      order.attendeeId !== claim.attendeeId ||
+      order.eventId !== claim.eventId ||
+      order.userId !== user._id ||
+      order.lifecycle === "cancelled" ||
+      (order.lifecycle !== "draft" &&
+        order.paymentStatus !== "pending_review" &&
+        order.paymentStatus !== "rejected") ||
+      !metadata ||
+      metadata._creationTime <= claim._creationTime ||
+      metadata._creationTime > claim.expiresAt ||
+      !sha256ValuesEqual(metadata.sha256, claim.sha256) ||
+      metadata.size !== claim.size ||
+      metadata.contentType !== claim.contentType ||
+      !PROOF_TYPES.has(metadata.contentType)
     )
       return false
     if (claim.storageId && claim.storageId !== args.storageId) return false
+    if (await hasConflictingStorageReference(ctx, args.storageId, claim._id))
+      return false
     await ctx.db.patch(claim._id, { storageId: args.storageId })
     return true
   },
@@ -1088,6 +1158,9 @@ export const finalizeProofUpload = internalMutation({
       }
     const metadata = await ctx.db.system.get("_storage", args.storageId)
     const order = claim ? await ctx.db.get(claim.orderId) : null
+    const hasConflictingReference = claim
+      ? await hasConflictingStorageReference(ctx, args.storageId, claim._id)
+      : true
     if (
       !claim ||
       !order ||
@@ -1099,26 +1172,19 @@ export const finalizeProofUpload = internalMutation({
         order.paymentStatus !== "pending_review" &&
         order.paymentStatus !== "rejected") ||
       claim.uploaderUserId !== user._id ||
-      claim.expiresAt < Date.now() ||
+      claim.expiresAt <= Date.now() ||
+      claim.storageId !== args.storageId ||
       !metadata ||
       metadata._creationTime <= claim._creationTime ||
       metadata._creationTime > claim.expiresAt ||
-      metadata.sha256 !== claim.sha256 ||
+      !sha256ValuesEqual(metadata.sha256, claim.sha256) ||
       metadata.size !== claim.size ||
       metadata.contentType !== claim.contentType ||
       !PROOF_TYPES.has(metadata.contentType) ||
+      hasConflictingReference ||
       !args.signatureValid
     ) {
-      if (claim) await ctx.db.delete(claim._id)
-      if (
-        claim &&
-        metadata &&
-        metadata._creationTime > claim._creationTime &&
-        metadata._creationTime <= claim.expiresAt &&
-        metadata.sha256 === claim.sha256 &&
-        metadata.size === claim.size
-      )
-        await ctx.storage.delete(args.storageId)
+      if (claim) await deleteClaimAndUnreferencedStorage(ctx, claim)
       return {
         ok: false as const,
         message: "This payment receipt could not be verified. Upload it again.",
@@ -1285,14 +1351,13 @@ export const cleanExpiredOrderArtifacts = internalMutation({
         .take(100),
     ])
     for (const claim of claims) {
-      if (claim.storageId) await ctx.storage.delete(claim.storageId)
-      await ctx.db.delete(claim._id)
+      await deleteClaimAndUnreferencedStorage(ctx, claim)
     }
     for (const receipt of receipts) await ctx.db.delete(receipt._id)
     const cursor = await ctx.db
       .query("storageScavengerCursors")
       .withIndex("by_name", (q) => q.eq("name", "payment-proof-orphans"))
-      .unique()
+      .first()
     const page = await ctx.db.system
       .query("_storage")
       .paginate({ numItems: 50, cursor: cursor?.cursor ?? null })
@@ -1303,17 +1368,17 @@ export const cleanExpiredOrderArtifacts = internalMutation({
         ctx.db
           .query("paymentProofs")
           .withIndex("by_storageId", (q) => q.eq("storageId", stored._id))
-          .unique(),
+          .first(),
         ctx.db
           .query("events")
           .withIndex("by_coverStorageId", (q) =>
             q.eq("coverStorageId", stored._id)
           )
-          .unique(),
+          .first(),
         ctx.db
           .query("proofUploadClaims")
           .withIndex("by_storageId", (q) => q.eq("storageId", stored._id))
-          .unique(),
+          .first(),
       ])
       if (!proof && !cover && !claim) {
         await ctx.storage.delete(stored._id)

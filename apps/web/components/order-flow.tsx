@@ -19,6 +19,7 @@ import {
   earliestIncompleteStep,
   missingRequiredFulfillmentFields,
   ORDER_STEPS,
+  unreservedQuantityAvailabilityIssues,
   type OrderStep,
 } from "@/lib/order-step-guards"
 import { api } from "@workspace/backend/convex/_generated/api"
@@ -255,6 +256,14 @@ export function OrderFlow({
   const selectedOption = checkout?.fulfillmentOptions.find(
     (option) => option._id === optionId
   )
+  const quantityAvailabilityIssues = checkout?.order
+    ? unreservedQuantityAvailabilityIssues({
+        items: checkout.items,
+        quantities,
+        reservationState: checkout.order.reservationState,
+      })
+    : []
+  const hasQuantityAvailabilityIssue = quantityAvailabilityIssues.length > 0
   const proposal = useMemo(() => {
     const existing = new Map(checkout?.lines.map((line) => [line.itemId, line]))
     const nextLines = lines.map(({ item, quantity }) => {
@@ -304,6 +313,7 @@ export function OrderFlow({
         ORDER_STEPS.indexOf(
           earliestIncompleteStep({
             lines,
+            hasQuantityExceedingAvailability: hasQuantityAvailabilityIssue,
             fulfillmentOptionId: optionId,
             guestName,
             reviewedAt: editReviewed ? 1 : undefined,
@@ -318,6 +328,7 @@ export function OrderFlow({
     if (!checkout?.order || !editHydrated || step === "items") return
     const earliest = earliestIncompleteStep({
       lines,
+      hasQuantityExceedingAvailability: hasQuantityAvailabilityIssue,
       fulfillmentOptionId: optionId,
       guestName,
       reviewedAt: editReviewed ? 1 : undefined,
@@ -332,6 +343,7 @@ export function OrderFlow({
     editHydrated,
     editReviewed,
     guestName,
+    hasQuantityAvailabilityIssue,
     lines,
     optionId,
     router,
@@ -420,6 +432,12 @@ export function OrderFlow({
 
   const persist = async (nextStep: OrderStep, reviewed = false) => {
     setError(null)
+    if (hasQuantityAvailabilityIssue) {
+      setError(
+        "Reduce the highlighted item quantities before continuing. Availability changed while you were ordering."
+      )
+      return
+    }
     const missing =
       nextStep === "review"
         ? missingRequiredFulfillmentFields(
@@ -608,60 +626,99 @@ export function OrderFlow({
           <Card>
             <CardContent className="space-y-4 pt-6">
               <p>Choose the items and quantities you need.</p>
-              {checkout.items.map((item) => (
-                <div
-                  key={item._id}
-                  className="flex items-center justify-between gap-3 border-b pb-4"
-                >
-                  <div className="min-w-0">
-                    <p className="font-semibold">{item.name}</p>
-                    <p className="text-muted-foreground">
-                      {formatMoney(item.priceMinor, checkout.event.currency)}{" "}
-                      per {item.unitLabel} · {item.availableQuantity} available
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="size-11"
-                      aria-label={`Reduce ${item.name} quantity`}
-                      onClick={() => {
-                        setEditReviewed(false)
-                        setQuantities((old) => ({
-                          ...old,
-                          [item._id]: Math.max(0, (old[item._id] ?? 0) - 1),
-                        }))
-                      }}
-                    >
-                      <MinusIcon aria-hidden="true" />
-                    </Button>
-                    <span className="w-8 text-center tabular-nums">
-                      {quantities[item._id] ?? 0}
-                    </span>
-                    <Button
-                      variant="outline"
-                      className="size-11"
-                      aria-label={`Increase ${item.name} quantity`}
-                      disabled={
-                        (quantities[item._id] ?? 0) >= item.availableQuantity
+              {hasQuantityAvailabilityIssue ? (
+                <Alert variant="destructive" aria-live="polite">
+                  <CircleAlertIcon aria-hidden="true" />
+                  <AlertTitle>Some quantities need to be reduced</AlertTitle>
+                  <AlertDescription>
+                    Availability changed while you were ordering. Reduce each
+                    highlighted item before continuing.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+              {checkout.items.map((item) => {
+                const quantityIssue = quantityAvailabilityIssues.find(
+                  (issue) => issue.itemId === item._id
+                )
+                return (
+                  <div key={item._id} className="border-b pb-4">
+                    <div
+                      className="flex items-center justify-between gap-3"
+                      aria-describedby={
+                        quantityIssue
+                          ? `item-${item._id}-availability-error`
+                          : undefined
                       }
-                      onClick={() => {
-                        setEditReviewed(false)
-                        setQuantities((old) => ({
-                          ...old,
-                          [item._id]: (old[item._id] ?? 0) + 1,
-                        }))
-                      }}
                     >
-                      <PlusIcon aria-hidden="true" />
-                    </Button>
+                      <div className="min-w-0">
+                        <p className="font-semibold">{item.name}</p>
+                        <p className="text-muted-foreground">
+                          {formatMoney(
+                            item.priceMinor,
+                            checkout.event.currency
+                          )}{" "}
+                          per {item.unitLabel} · {item.availableQuantity}{" "}
+                          available
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="size-11"
+                          aria-label={`Reduce ${item.name} quantity`}
+                          onClick={() => {
+                            setEditReviewed(false)
+                            setQuantities((old) => ({
+                              ...old,
+                              [item._id]: Math.max(0, (old[item._id] ?? 0) - 1),
+                            }))
+                          }}
+                        >
+                          <MinusIcon aria-hidden="true" />
+                        </Button>
+                        <span className="w-8 text-center tabular-nums">
+                          {quantities[item._id] ?? 0}
+                        </span>
+                        <Button
+                          variant="outline"
+                          className="size-11"
+                          aria-label={`Increase ${item.name} quantity`}
+                          disabled={
+                            (quantities[item._id] ?? 0) >=
+                            item.availableQuantity
+                          }
+                          onClick={() => {
+                            setEditReviewed(false)
+                            setQuantities((old) => ({
+                              ...old,
+                              [item._id]: (old[item._id] ?? 0) + 1,
+                            }))
+                          }}
+                        >
+                          <PlusIcon aria-hidden="true" />
+                        </Button>
+                      </div>
+                    </div>
+                    {quantityIssue ? (
+                      <p
+                        id={`item-${item._id}-availability-error`}
+                        role="alert"
+                        className="mt-3 text-lg font-medium text-destructive"
+                      >
+                        You selected {quantities[item._id] ?? 0}, but only{" "}
+                        {item.availableQuantity} are available. Reduce this
+                        quantity to continue.
+                      </p>
+                    ) : null}
                   </div>
-                </div>
-              ))}
+                )
+              })}
               <Button
                 className="min-h-12 w-full"
-                disabled={pending || lines.length === 0}
+                disabled={
+                  pending || lines.length === 0 || hasQuantityAvailabilityIssue
+                }
                 onClick={() => void persist("fulfillment")}
               >
                 Continue to Pickup or delivery
