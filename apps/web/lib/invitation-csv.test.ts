@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   createInvitationErrorCsv,
   getImportChunks,
+  normalizeInvitationEmail,
   parseInvitationImport,
 } from "./invitation-csv"
 
@@ -36,6 +37,18 @@ describe("invitation import parsing", () => {
 
     expect(result.errors).toEqual([])
     expect(result.rows.map((row) => row.name)).toEqual(["Ada", "Ola"])
+  })
+
+  it("prefers tab-delimited paste when a name contains a comma", () => {
+    const result = parseInvitationImport(
+      "name\temail\nDoe, Jane\tjane@example.com",
+      "paste"
+    )
+
+    expect(result.errors).toEqual([])
+    expect(result.rows).toEqual([
+      expect.objectContaining({ name: "Doe, Jane", email: "jane@example.com" }),
+    ])
   })
 
   it("supports headerless pasted positional rows", () => {
@@ -76,6 +89,10 @@ describe("invitation import parsing", () => {
     expect(result.rows[2]?.errors).toContain("Enter a valid email address.")
   })
 
+  it("normalizes emails independently of the browser locale", () => {
+    expect(normalizeInvitationEmail(" I@EXAMPLE.COM ")).toBe("i@example.com")
+  })
+
   it("rejects an import with more than 1,000 rows", () => {
     const rows = Array.from(
       { length: 1_001 },
@@ -89,6 +106,16 @@ describe("invitation import parsing", () => {
     expect(result.errors).toContain(
       "An import can contain up to 1,000 guest rows."
     )
+  })
+
+  it("rejects malformed CSV quote placement", () => {
+    expect(
+      parseInvitationImport('name,email\nBad"Name,bad@example.com', "csv")
+        .errors
+    ).toEqual(["A quoted value must start at the beginning of a column."])
+    expect(
+      parseInvitationImport('name,email\n"Bad"x,bad@example.com', "csv").errors
+    ).toEqual(["A quoted value must end before the next column."])
   })
 
   it("creates bounded chunks of 100 valid rows", () => {
@@ -129,17 +156,24 @@ describe("invitation import error export", () => {
     )
   })
 
-  it("protects formulas preceded by spreadsheet whitespace controls", () => {
+  it("protects cells beginning with spreadsheet whitespace controls", () => {
     const csv = createInvitationErrorCsv([
       {
         rowNumber: 6,
-        name: "\t=SUM(1,1)",
-        email: "\r+cmd@example.com",
+        name: "\tplain",
+        email: "\rplain@example.com",
+        outcome: "invalid",
+      },
+      {
+        rowNumber: 7,
+        name: " =SUM(1,1)",
+        email: "guest@example.com",
         outcome: "invalid",
       },
     ])
 
-    expect(csv).toContain('"\'\t=SUM(1,1)"')
-    expect(csv).toContain('"\'\r+cmd@example.com"')
+    expect(csv).toContain("'\tplain")
+    expect(csv).toContain("'\rplain@example.com")
+    expect(csv).toContain('"\' =SUM(1,1)"')
   })
 })

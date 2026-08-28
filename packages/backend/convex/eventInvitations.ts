@@ -350,7 +350,9 @@ export const importBatch = mutation({
       )
     if (
       args.rows.some(
-        (row) => !Number.isInteger(row.rowNumber) || row.rowNumber < 2
+        (row) =>
+          !Number.isInteger(row.rowNumber) ||
+          row.rowNumber < (args.source === "csv" ? 2 : 1)
       )
     )
       throw new ConvexError("Import row numbers are invalid.")
@@ -383,42 +385,11 @@ export const importBatch = mutation({
       error?: string
     }> = []
     for (const row of args.rows) {
+      let name: string
+      let email: string
       try {
-        const name = normalizeName(row.name)
-        const email = normalizeEmail(row.email)
-        const existing = await ctx.db
-          .query("eventInvitations")
-          .withIndex("by_eventId_and_normalizedEmail", (q) =>
-            q.eq("eventId", args.eventId).eq("normalizedEmail", email)
-          )
-          .unique()
-        if (existing) {
-          outcomes.push({
-            rowNumber: row.rowNumber,
-            outcome: "duplicate",
-            error: "This email address is already on the guest list.",
-          })
-          continue
-        }
-        const now = Date.now()
-        const invitation = await insertInvitation(ctx, {
-          eventId: args.eventId,
-          name,
-          email,
-          normalizedEmail: email,
-          searchText: searchText(name, email),
-          source: args.source,
-          latestDeliveryState: "not_sent",
-          activity: "not_started",
-          sendGeneration: 0,
-          createdAt: now,
-          updatedAt: now,
-        })
-        outcomes.push({
-          rowNumber: row.rowNumber,
-          outcome: "created",
-          invitationId: invitation._id,
-        })
+        name = normalizeName(row.name)
+        email = normalizeEmail(row.email)
       } catch (error) {
         outcomes.push({
           rowNumber: row.rowNumber,
@@ -428,7 +399,41 @@ export const importBatch = mutation({
               ? error.message.slice(0, 300)
               : "This row is invalid.",
         })
+        continue
       }
+      const existing = await ctx.db
+        .query("eventInvitations")
+        .withIndex("by_eventId_and_normalizedEmail", (q) =>
+          q.eq("eventId", args.eventId).eq("normalizedEmail", email)
+        )
+        .unique()
+      if (existing) {
+        outcomes.push({
+          rowNumber: row.rowNumber,
+          outcome: "duplicate",
+          error: "This email address is already on the guest list.",
+        })
+        continue
+      }
+      const now = Date.now()
+      const invitation = await insertInvitation(ctx, {
+        eventId: args.eventId,
+        name,
+        email,
+        normalizedEmail: email,
+        searchText: searchText(name, email),
+        source: args.source,
+        latestDeliveryState: "not_sent",
+        activity: "not_started",
+        sendGeneration: 0,
+        createdAt: now,
+        updatedAt: now,
+      })
+      outcomes.push({
+        rowNumber: row.rowNumber,
+        outcome: "created",
+        invitationId: invitation._id,
+      })
     }
     const now = Date.now()
     await ctx.db.insert("eventInvitationImportChunks", {
@@ -482,7 +487,6 @@ export const update = mutation({
             latestDeliveryState: "not_sent",
             currentNotificationId: undefined,
             latestSentAt: undefined,
-            sendGeneration: invitation.sendGeneration + 1,
             matchedUserId: undefined,
             attendeeId: undefined,
             orderId: undefined,
@@ -500,7 +504,8 @@ async function findSendReplay(
   eventId: Id<"events">,
   requestId: string,
   kind: "send" | "retry",
-  invitationIds: Id<"eventInvitations">[]
+  invitationIds: Id<"eventInvitations">[],
+  resend = false
 ) {
   const existing = await ctx.db
     .query("eventInvitationSendRequests")
@@ -511,6 +516,7 @@ async function findSendReplay(
   if (!existing) return null
   if (
     existing.kind !== kind ||
+    existing.resend !== resend ||
     existing.invitationIds.length !== invitationIds.length ||
     existing.invitationIds.some((id, index) => id !== invitationIds[index])
   )
@@ -526,6 +532,7 @@ async function saveSendReceipt(
   requestId: string,
   kind: "send" | "retry",
   invitationIds: Id<"eventInvitations">[],
+  resend: boolean,
   results: Array<{
     invitationId: Id<"eventInvitations">
     outcome: "queued" | "retried" | "already_sent" | "blocked" | "not_found"
@@ -536,6 +543,7 @@ async function saveSendReceipt(
     eventId,
     requestId,
     kind,
+    resend,
     invitationIds,
     results,
     createdAt: now,
@@ -570,7 +578,8 @@ export const send = mutation({
       args.eventId,
       args.requestId,
       "send",
-      args.invitationIds
+      args.invitationIds,
+      args.resend === true
     )
     if (replay) return replay
     if (event.status !== "published" || !event.shareToken)
@@ -590,10 +599,10 @@ export const send = mutation({
         results.push({ invitationId, outcome: "blocked" })
         continue
       }
-      if (
-        !args.resend &&
-        ["queued", "sent", "delivered"].includes(invitation.latestDeliveryState)
-      ) {
+      const eligible = args.resend
+        ? ["sent", "delivered"].includes(invitation.latestDeliveryState)
+        : invitation.latestDeliveryState === "not_sent"
+      if (!eligible) {
         results.push({ invitationId, outcome: "already_sent" })
         continue
       }
@@ -634,6 +643,7 @@ export const send = mutation({
       args.requestId,
       "send",
       args.invitationIds,
+      args.resend === true,
       results
     )
     return results
@@ -684,10 +694,6 @@ export const retry = mutation({
       await ctx.runMutation(internal.notifications.retryInternal, {
         notificationId: invitation.currentNotificationId,
       })
-      await replaceInvitation(ctx, invitation, {
-        latestDeliveryState: "queued",
-        updatedAt: Date.now(),
-      })
       results.push({ invitationId, outcome: "retried" })
     }
     await saveSendReceipt(
@@ -696,6 +702,7 @@ export const retry = mutation({
       args.requestId,
       "retry",
       args.invitationIds,
+      false,
       results
     )
     return results
@@ -767,7 +774,10 @@ export const matchCheckoutStarted = internalMutation({
     await replaceInvitation(ctx, invitation, {
       matchedUserId: args.userId,
       attendeeId: args.attendeeId,
-      activity: "checkout_started",
+      activity:
+        invitation.activity === "not_started"
+          ? "checkout_started"
+          : invitation.activity,
       updatedAt: Date.now(),
     })
     return null
@@ -793,6 +803,16 @@ export const cleanExpiredReceipts = internalMutation({
       ...importChunks.map((row) => ctx.db.delete(row._id)),
       ...sendRequests.map((row) => ctx.db.delete(row._id)),
     ])
+    if (
+      importChunks.length === MAX_CHUNK_ROWS ||
+      sendRequests.length === MAX_CHUNK_ROWS
+    ) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.eventInvitations.cleanExpiredReceipts,
+        {}
+      )
+    }
     return {
       importChunks: importChunks.length,
       sendRequests: sendRequests.length,

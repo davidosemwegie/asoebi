@@ -136,7 +136,8 @@ const DELIVERY_FILTERS: Array<{ label: string; value: DeliveryState | "all" }> =
     { label: "Sending", value: "queued" },
     { label: "Sent", value: "sent" },
     { label: "Delivered", value: "delivered" },
-    { label: "Needs attention", value: "failed" },
+    { label: "Delayed — needs attention", value: "delayed" },
+    { label: "Failed — needs attention", value: "failed" },
     { label: "Do not resend", value: "suppressed" },
   ]
 
@@ -219,18 +220,33 @@ function ActivityBadge({ activity }: { activity: Activity }) {
   )
 }
 
-function rowAction(invitation: Invitation) {
+type RowAction =
+  | { kind: "action"; action: "retry" | "send"; label: string; resend: boolean }
+  | { kind: "status"; copy: string }
+
+function rowAction(invitation: Invitation): RowAction {
   if (invitation.latestDeliveryState === "not_sent") {
-    return { action: "send" as const, label: "Send", resend: false }
+    return { kind: "action", action: "send", label: "Send", resend: false }
   }
   if (
     invitation.latestDeliveryState === "failed" ||
     invitation.latestDeliveryState === "delayed"
   ) {
-    return { action: "retry" as const, label: "Retry", resend: false }
+    return { kind: "action", action: "retry", label: "Retry", resend: false }
   }
-  if (invitation.latestDeliveryState === "suppressed") return null
-  return { action: "send" as const, label: "Resend", resend: true }
+  if (invitation.latestDeliveryState === "queued") {
+    return {
+      kind: "status",
+      copy: "Already sending. Wait for the delivery status to update.",
+    }
+  }
+  if (invitation.latestDeliveryState === "suppressed") {
+    return {
+      kind: "status",
+      copy: "Correct the email address before sending another invitation.",
+    }
+  }
+  return { kind: "action", action: "send", label: "Resend", resend: true }
 }
 
 function GuestActions({
@@ -257,7 +273,7 @@ function GuestActions({
       >
         <Edit3Icon aria-hidden="true" /> Edit
       </Button>
-      {action ? (
+      {action.kind === "action" ? (
         <Button
           ref={sendRef}
           type="button"
@@ -279,8 +295,8 @@ function GuestActions({
           {action.label}
         </Button>
       ) : (
-        <span className="text-base text-muted-foreground">
-          Correct the email before sending again.
+        <span className="max-w-56 text-right text-base text-muted-foreground">
+          {action.copy}
         </span>
       )}
     </div>

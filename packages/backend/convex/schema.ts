@@ -169,6 +169,7 @@ export default defineSchema({
     eventId: v.id("events"),
     requestId: v.string(),
     kind: v.union(v.literal("send"), v.literal("retry")),
+    resend: v.boolean(),
     invitationIds: v.array(v.id("eventInvitations")),
     results: v.array(
       v.object({

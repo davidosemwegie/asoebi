@@ -24,24 +24,27 @@ export type InvitationImportOutcome = {
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const FORMULA_PREFIX_PATTERN = /^[=+\-@]/
+const FORMULA_PREFIX_PATTERN = /^[=+\-@\t\r]/
 
 function normalizeHeader(value: string) {
-  return value.trim().toLocaleLowerCase()
+  return value.trim().toLowerCase()
 }
 
 export function normalizeInvitationEmail(value: string) {
-  return value.trim().toLocaleLowerCase()
+  return value.trim().toLowerCase()
 }
 
-function csvRows(input: string): string[][] {
+function csvRows(input: string, delimiter: string): string[][] {
   const rows: string[][] = []
   let cell = ""
   let row: string[] = []
   let inQuotes = false
+  let justClosedQuote = false
+  let hasCurrentCell = false
 
   for (let index = 0; index < input.length; index += 1) {
     const character = input[index]
+    if (character === undefined) continue
 
     if (inQuotes) {
       if (character === '"' && input[index + 1] === '"') {
@@ -49,24 +52,65 @@ function csvRows(input: string): string[][] {
         index += 1
       } else if (character === '"') {
         inQuotes = false
+        justClosedQuote = true
       } else {
         cell += character
       }
       continue
     }
 
-    if (character === '"') {
+    if (justClosedQuote) {
+      if (character === delimiter) {
+        row.push(cell)
+        cell = ""
+        justClosedQuote = false
+        hasCurrentCell = false
+      } else if (character === "\n") {
+        row.push(cell)
+        rows.push(row)
+        row = []
+        cell = ""
+        justClosedQuote = false
+        hasCurrentCell = false
+      } else if (character === "\r") {
+        row.push(cell)
+        rows.push(row)
+        row = []
+        cell = ""
+        justClosedQuote = false
+        hasCurrentCell = false
+        if (input[index + 1] === "\n") index += 1
+      } else {
+        throw new Error("A quoted value must end before the next column.")
+      }
+    } else if (character === '"') {
+      if (cell.length > 0) {
+        throw new Error(
+          "A quoted value must start at the beginning of a column."
+        )
+      }
       inQuotes = true
-    } else if (character === ",") {
+      hasCurrentCell = true
+    } else if (character === delimiter) {
       row.push(cell)
       cell = ""
+      hasCurrentCell = false
     } else if (character === "\n") {
       row.push(cell)
       rows.push(row)
       row = []
       cell = ""
-    } else if (character !== "\r") {
+      hasCurrentCell = false
+    } else if (character === "\r") {
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ""
+      hasCurrentCell = false
+      if (input[index + 1] === "\n") index += 1
+    } else {
       cell += character
+      hasCurrentCell = true
     }
   }
 
@@ -74,16 +118,12 @@ function csvRows(input: string): string[][] {
     throw new Error("A quoted value is not closed.")
   }
 
-  if (cell || row.length > 0) {
+  if (hasCurrentCell || row.length > 0) {
     row.push(cell)
     rows.push(row)
   }
 
   return rows
-}
-
-function delimitedRows(input: string, delimiter: string): string[][] {
-  return input.split(/\r?\n/).map((line) => line.split(delimiter))
 }
 
 function isBlankRow(row: string[]) {
@@ -179,11 +219,10 @@ export function parseInvitationImport(
 
   try {
     return validateRows(
-      source === "paste" &&
-        !withoutBom.includes(",") &&
-        withoutBom.includes("\t")
-        ? delimitedRows(withoutBom, "\t")
-        : csvRows(withoutBom),
+      csvRows(
+        withoutBom,
+        source === "paste" && withoutBom.includes("\t") ? "\t" : ","
+      ),
       source === "paste"
     )
   } catch (error) {
@@ -204,9 +243,11 @@ export function getImportChunks(rows: InvitationImportRow[]) {
 }
 
 function escapeCsvValue(value: string) {
-  const formulaSafeValue = FORMULA_PREFIX_PATTERN.test(value.trim())
-    ? `'${value}`
-    : value
+  const formulaSafeValue =
+    FORMULA_PREFIX_PATTERN.test(value) ||
+    FORMULA_PREFIX_PATTERN.test(value.trim())
+      ? `'${value}`
+      : value
   return /[",\r\n]/.test(formulaSafeValue)
     ? `"${formulaSafeValue.replaceAll('"', '""')}"`
     : formulaSafeValue

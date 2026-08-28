@@ -1,16 +1,37 @@
 /// <reference types="vite/client" />
 
 import aggregateTest from "@convex-dev/aggregate/test"
+import { TableAggregate } from "@convex-dev/aggregate"
 import betterAuthTest from "@convex-dev/better-auth/test"
 import { convexTest } from "convex-test"
 import { beforeAll, describe, expect, it, vi } from "vitest"
 
 import { api, components, internal } from "./_generated/api"
-import type { Id } from "./_generated/dataModel"
+import type { DataModel, Id } from "./_generated/dataModel"
 import schema from "./schema"
 
 const modules = import.meta.glob("./**/*.ts")
 const DAY = 24 * 60 * 60 * 1_000
+
+const invitationDeliveryCounts = new TableAggregate<{
+  Namespace: Id<"events">
+  Key: string
+  DataModel: DataModel
+  TableName: "eventInvitations"
+}>(components.invitationDeliveryCounts, {
+  namespace: (doc) => doc.eventId,
+  sortKey: (doc) => doc.latestDeliveryState,
+})
+
+const invitationActivityCounts = new TableAggregate<{
+  Namespace: Id<"events">
+  Key: string
+  DataModel: DataModel
+  TableName: "eventInvitations"
+}>(components.invitationActivityCounts, {
+  namespace: (doc) => doc.eventId,
+  sortKey: (doc) => doc.activity,
+})
 
 beforeAll(() => {
   vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-that-is-at-least-32-characters")
@@ -83,6 +104,18 @@ async function publishForSending(t: Test, eventId: Id<"events">) {
   await t.run(async (ctx) => {
     await ctx.db.patch(eventId, { status: "published" })
   })
+}
+
+async function deliveryCount(t: Test, eventId: Id<"events">, state: string) {
+  return await t.run(async (ctx) =>
+    invitationDeliveryCounts.count(ctx, {
+      namespace: eventId,
+      bounds: {
+        lower: { key: state, inclusive: true },
+        upper: { key: state, inclusive: true },
+      },
+    })
+  )
 }
 
 describe("event invitations", () => {
@@ -195,6 +228,21 @@ describe("event invitations", () => {
     ).toHaveLength(0)
   })
 
+  it("accepts row one for a headerless pasted import", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    await expect(
+      client.mutation(api.eventInvitations.importBatch, {
+        eventId,
+        importId: "headerless-paste-0001",
+        chunkIndex: 0,
+        source: "paste",
+        rows: [{ rowNumber: 1, name: "Ada", email: "ada@example.com" }],
+      })
+    ).resolves.toMatchObject({ summary: { created: 1 } })
+  })
+
   it("enforces 100-row chunks and a ten-chunk import boundary", async () => {
     const t = createTest()
     const { client } = await createUser(t, "owner@example.com")
@@ -222,6 +270,44 @@ describe("event invitations", () => {
         rows: rows.slice(0, 1),
       })
     ).rejects.toThrow("chunk is invalid")
+  })
+
+  it("continues bounded receipt cleanup until expired imports are drained", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    const expiredAt = Date.now() - 1
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 101; index += 1) {
+        await ctx.db.insert("eventInvitationImportChunks", {
+          eventId,
+          importId: `expired-import-${index}`,
+          chunkIndex: 0,
+          payloadHash: `${index}`,
+          outcomes: [{ rowNumber: 2, outcome: "invalid", error: "Invalid" }],
+          createdAt: expiredAt,
+          expiresAt: expiredAt,
+        })
+      }
+    })
+    await t.mutation(internal.eventInvitations.cleanExpiredReceipts, {})
+    expect(
+      await t.run(async (ctx) =>
+        ctx.db
+          .query("eventInvitationImportChunks")
+          .withIndex("by_expiresAt", (q) => q.lte("expiresAt", Date.now()))
+          .take(101)
+      )
+    ).toHaveLength(1)
+    expect(
+      (
+        await t.run(async (ctx) =>
+          ctx.db.system.query("_scheduled_functions").take(10)
+        )
+      ).map(({ name }) => name)
+    ).toEqual([
+      expect.stringContaining("eventInvitations:cleanExpiredReceipts"),
+    ])
   })
 
   it("requires an explicit selected send, creates a new generation for resend, and blocks correction-free suppression", async () => {
@@ -253,6 +339,10 @@ describe("event invitations", () => {
     })
     expect(first).toEqual(replay)
     const afterFirst = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
+      notificationId: afterFirst!.currentNotificationId!,
+      status: "sent",
+    })
     const resend = await client.mutation(api.eventInvitations.send, {
       eventId,
       invitationIds: [invitation._id],
@@ -262,6 +352,14 @@ describe("event invitations", () => {
     const afterResend = await t.run(async (ctx) => ctx.db.get(invitation._id))
     expect(resend[0].outcome).toBe("queued")
     expect(afterResend!.sendGeneration).toBe(afterFirst!.sendGeneration + 1)
+    await expect(
+      client.mutation(api.eventInvitations.send, {
+        eventId,
+        invitationIds: [invitation._id],
+        requestId: "send-0002",
+        resend: true,
+      })
+    ).rejects.toThrow("conflicts")
     await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
       notificationId: afterResend!.currentNotificationId!,
       status: "bounced",
@@ -273,6 +371,57 @@ describe("event invitations", () => {
         requestId: "retry-0001",
       })
     ).resolves.toEqual([{ invitationId: invitation._id, outcome: "blocked" }])
+  })
+
+  it("retries failed and delayed invitations with one aggregate state replacement", async () => {
+    const t = createTest()
+    const { client } = await createUser(t, "owner@example.com")
+    const eventId = await createEvent(client)
+    await publishForSending(t, eventId)
+    const invitation = await client.mutation(api.eventInvitations.add, {
+      eventId,
+      name: "Guest",
+      email: "guest@example.com",
+    })
+    await client.mutation(api.eventInvitations.send, {
+      eventId,
+      invitationIds: [invitation._id],
+      requestId: "send-0020",
+    })
+    const current = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    await t.run(async (ctx) => {
+      await ctx.db.patch(current!.currentNotificationId!, { status: "failed" })
+    })
+    await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
+      notificationId: current!.currentNotificationId!,
+      status: "failed",
+    })
+    expect(await deliveryCount(t, eventId, "failed")).toBe(1)
+    await expect(
+      client.mutation(api.eventInvitations.retry, {
+        eventId,
+        invitationIds: [invitation._id],
+        requestId: "retry-0020",
+      })
+    ).resolves.toEqual([{ invitationId: invitation._id, outcome: "retried" }])
+    expect(await deliveryCount(t, eventId, "failed")).toBe(0)
+    expect(await deliveryCount(t, eventId, "queued")).toBe(1)
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(current!.currentNotificationId!, { status: "delayed" })
+    })
+    await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
+      notificationId: current!.currentNotificationId!,
+      status: "delayed",
+    })
+    expect(await deliveryCount(t, eventId, "delayed")).toBe(1)
+    await client.mutation(api.eventInvitations.retry, {
+      eventId,
+      invitationIds: [invitation._id],
+      requestId: "retry-0021",
+    })
+    expect(await deliveryCount(t, eventId, "delayed")).toBe(0)
+    expect(await deliveryCount(t, eventId, "queued")).toBe(1)
   })
 
   it("ignores an older logical notification when projecting a late provider update", async () => {
@@ -291,6 +440,10 @@ describe("event invitations", () => {
       requestId: "send-0010",
     })
     const first = await t.run(async (ctx) => ctx.db.get(invitation._id))
+    await t.mutation(internal.eventInvitations.projectNotificationDelivery, {
+      notificationId: first!.currentNotificationId!,
+      status: "sent",
+    })
     await client.mutation(api.eventInvitations.send, {
       eventId,
       invitationIds: [invitation._id],
@@ -344,6 +497,18 @@ describe("event invitations", () => {
       matchedUserId: userId,
       activity: "checkout_started",
     })
+    await t.run(async (ctx) => {
+      const before = await ctx.db.get(invitation._id)
+      await ctx.db.patch(invitation._id, { activity: "order_submitted" })
+      const after = await ctx.db.get(invitation._id)
+      await invitationActivityCounts.replace(ctx, before!, after!)
+    })
+    await verified.mutation(api.eventAttendees.startCheckout, {
+      shareToken: event!.shareToken!,
+    })
+    expect(
+      (await t.run(async (ctx) => ctx.db.get(invitation._id)))!.activity
+    ).toBe("order_submitted")
     await expect(
       unverified.mutation(api.eventAttendees.startCheckout, {
         shareToken: event!.shareToken!,

@@ -165,7 +165,7 @@ export function EventInvitationSheet({
                   name="email"
                   type="email"
                   defaultValue={invitation?.email ?? ""}
-                  maxLength={254}
+                  maxLength={320}
                   autoComplete="email"
                   aria-describedby={
                     fieldErrors.email ? "invitation-email-error" : undefined
