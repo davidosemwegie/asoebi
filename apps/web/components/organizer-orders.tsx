@@ -374,8 +374,9 @@ export function OrganizerOrders() {
       ) : result.page.length === 0 ? (
         <Card>
           <CardContent className="pt-5 text-base">
-            No orders match these filters. Change a filter or try a different
-            search.
+            {result.isDone
+              ? "No orders match these filters. Change a filter or try a different search."
+              : "No matching orders are in this page. Select Next to keep checking."}
           </CardContent>
         </Card>
       ) : null}

@@ -127,22 +127,25 @@ describe("organizer CSV stream", () => {
   it("continues past a filter-empty source page", async () => {
     vi.stubEnv("NEXT_PUBLIC_CONVEX_SITE_URL", "https://example.convex.site")
     vi.mocked(getToken).mockResolvedValue("owner-token")
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          Response.json({ rows: [], continueCursor: "next", isDone: false })
-        )
-        .mockResolvedValueOnce(
-          Response.json({ rows: [row], continueCursor: null, isDone: true })
-        )
-    )
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ rows: [], continueCursor: "next", isDone: false })
+      )
+      .mockResolvedValueOnce(
+        Response.json({ rows: [row], continueCursor: null, isDone: true })
+      )
+    vi.stubGlobal("fetch", fetchMock)
     const response = await GET(
-      new Request("http://localhost/api/events/event/orders.csv?itemId=item"),
+      new Request(
+        "http://localhost/api/events/event/orders.csv?itemId=item&paymentStatus=pending_review&fulfillmentOptionId=option"
+      ),
       { params: Promise.resolve({ eventId: "event" }) }
     )
     expect(await response.text()).toContain("'=formula()")
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "fulfillmentOptionId=option"
+    )
   })
 
   it("does not truncate more than one thousand logical export rows", async () => {

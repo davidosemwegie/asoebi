@@ -127,11 +127,12 @@ async function event(t: Harness, type: "pickup" | "delivery" = "pickup") {
   }
 }
 
-async function submitted(
+async function submittedLines(
   t: Harness,
   setup: Awaited<ReturnType<typeof event>>,
   email: string,
-  itemId = setup.itemId
+  lines: Array<{ itemId: Id<"items">; quantity: number }>,
+  optionId = setup.optionId
 ) {
   const guest = await user(t, email)
   await guest.client.mutation(api.eventAttendees.startCheckout, {
@@ -139,16 +140,16 @@ async function submitted(
   })
   const fulfillment =
     setup.type === "pickup"
-      ? { optionId: setup.optionId, pickupContact: "Ada" }
+      ? { optionId, pickupContact: "Ada" }
       : {
-          optionId: setup.optionId,
+          optionId,
           recipientName: "Ada",
           phoneNumber: "123",
           address: "Lagos",
         }
   const orderId = await guest.client.mutation(api.checkout.saveDraft, {
     shareToken: setup.shareToken,
-    lines: [{ itemId, quantity: 1 }],
+    lines,
     fulfillment,
     guestName: "Ada",
     guestPhone: "123",
@@ -174,13 +175,23 @@ async function submitted(
   await guest.client.mutation(api.checkout.submit, {
     shareToken: setup.shareToken,
     requestId: `submit-${email.replace(/[^A-Za-z0-9_-]/g, "-")}`,
-    lines: [{ itemId, quantity: 1 }],
+    lines,
     fulfillment,
     proofId,
     guestName: "Ada",
     guestPhone: "123",
   })
   return { guest, orderId, proofId, fulfillment }
+}
+
+async function submitted(
+  t: Harness,
+  setup: Awaited<ReturnType<typeof event>>,
+  email: string,
+  itemId = setup.itemId,
+  optionId = setup.optionId
+) {
+  return await submittedLines(t, setup, email, [{ itemId, quantity: 1 }], optionId)
 }
 
 async function confirm(
@@ -436,6 +447,98 @@ describe("organizer orders", () => {
         blankHistory.find((entry) => entry.paymentStatus === "confirmed")?.note
       ).toBeUndefined()
     })
+  })
+
+  it("exports every captured line after an item filter selects an order", async () => {
+    const t = test()
+    const setup = await event(t)
+    const geleId = await setup.owner.client.mutation(api.items.create, {
+      eventId: setup.eventId,
+      name: "Gele, \"special\"",
+      unitLabel: "piece",
+      priceMinor: 2000,
+      inventoryTotal: 10,
+    })
+    const multiLine = await submittedLines(t, setup, "multi@example.com", [
+      { itemId: setup.itemId, quantity: 1 },
+      { itemId: geleId, quantity: 1 },
+    ])
+    const listed = await setup.owner.client.query(api.organizerOrders.list, {
+      eventId: setup.eventId,
+      itemId: setup.itemId,
+      paginationOpts: { cursor: null, numItems: 20 },
+    })
+    expect(listed.page.map((order) => order._id)).toEqual([multiLine.orderId])
+    const exported = await setup.owner.client.query(
+      internal.organizerOrders.getExportPage,
+      { eventId: setup.eventId, itemId: setup.itemId, cursor: null }
+    )
+    expect(
+      exported.rows
+        .filter((row) => row.reference === listed.page[0]!.reference)
+        .map((row) => row.item)
+        .sort()
+    ).toEqual(['Gele, "special"', "Lace"])
+  })
+
+  it("returns bounded sparse pages for combined filters and resumes list/export", async () => {
+    const t = test()
+    const setup = await event(t)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(setup.itemId, { inventoryTotal: 40 })
+    })
+    const selectedOption = await setup.owner.client.mutation(
+      api.eventSetup.createFulfillmentOption,
+      {
+        eventId: setup.eventId,
+        name: "Selected pickup",
+        type: "pickup",
+        feeMinor: 100,
+        instructions: "Bring ID",
+        enabled: true,
+        requiredFields: { kind: "pickup", pickupContact: true },
+      }
+    )
+    const matching = await submitted(
+      t,
+      setup,
+      "matching-sparse@example.com",
+      setup.itemId,
+      selectedOption
+    )
+    for (let index = 0; index < 26; index++)
+      await submitted(t, setup, `sparse-${index}@example.com`)
+    const filters = {
+      eventId: setup.eventId,
+      itemId: setup.itemId,
+      paymentStatus: "pending_review" as const,
+      fulfillmentOptionId: selectedOption,
+    }
+    const first = await setup.owner.client.query(api.organizerOrders.list, {
+      ...filters,
+      paginationOpts: { cursor: null, numItems: 20 },
+    })
+    expect(first.page).toEqual([])
+    expect(first.isDone).toBe(false)
+    const second = await setup.owner.client.query(api.organizerOrders.list, {
+      ...filters,
+      paginationOpts: { cursor: first.continueCursor, numItems: 20 },
+    })
+    expect(second.page.map((order) => order._id)).toEqual([matching.orderId])
+    const firstExport = await setup.owner.client.query(
+      internal.organizerOrders.getExportPage,
+      { ...filters, cursor: null }
+    )
+    expect(firstExport.rows).toEqual([])
+    expect(firstExport.isDone).toBe(false)
+    const secondExport = await setup.owner.client.query(
+      internal.organizerOrders.getExportPage,
+      { ...filters, cursor: firstExport.continueCursor }
+    )
+    expect(secondExport.rows.map((row) => row.reference)).toHaveLength(1)
+    expect(secondExport.rows[0]!.reference).toBe(
+      second.page[0]!.reference
+    )
   })
 
   it("uses indexed item candidates and keeps cancelled, not drafts, in paginated list/export parity", async () => {

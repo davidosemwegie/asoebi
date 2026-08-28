@@ -276,18 +276,29 @@ type OrderCandidateArgs = Omit<OrderListArgs, "paginationOpts">
 type CandidateSource =
   | "event"
   | "fulfillmentType"
+  | "fulfillmentTypePayment"
+  | "fulfillmentTypeProgress"
   | "fulfillmentOption"
+  | "fulfillmentOptionPayment"
+  | "fulfillmentOptionProgress"
   | "item"
   | "itemPayment"
   | "itemProgress"
   | "payment"
+  | "paymentProgress"
   | "progress"
   | "search"
+
+// A request may inspect exactly one bounded candidate page. This prevents a
+// sparse combined filter from reading an event's entire order history before
+// returning an empty result; the opaque cursor advances to the next slice.
+const ORDER_SOURCE_PAGE_SIZE = 25
 
 type OrderListCursor = {
   source: CandidateSource
   sourceCursor: string | null
   pending: string[]
+  sourceDone: boolean
   filterKey: string
 }
 
@@ -340,6 +351,15 @@ function candidateSource(
         ? "itemProgress"
         : "item"
   if (search) return "search"
+  if (args.fulfillmentOptionId && args.paymentStatus)
+    return "fulfillmentOptionPayment"
+  if (args.fulfillmentOptionId && args.progress)
+    return "fulfillmentOptionProgress"
+  if (args.fulfillmentType && args.paymentStatus)
+    return "fulfillmentTypePayment"
+  if (args.fulfillmentType && args.progress)
+    return "fulfillmentTypeProgress"
+  if (args.paymentStatus && args.progress) return "paymentProgress"
   if (args.fulfillmentOptionId) return "fulfillmentOption"
   if (args.paymentStatus) return "payment"
   if (args.progress) return "progress"
@@ -352,7 +372,14 @@ function decodeOrderListCursor(
   source: CandidateSource,
   filterKey: string
 ): OrderListCursor {
-  if (!cursor) return { source, sourceCursor: null, pending: [], filterKey }
+  if (!cursor)
+    return {
+      source,
+      sourceCursor: null,
+      pending: [],
+      sourceDone: false,
+      filterKey,
+    }
   try {
     const decoded = JSON.parse(atob(cursor)) as unknown
     if (
@@ -366,6 +393,8 @@ function decodeOrderListCursor(
       decoded.source !== source ||
       !("filterKey" in decoded) ||
       decoded.filterKey !== filterKey ||
+      !("sourceDone" in decoded) ||
+      typeof decoded.sourceDone !== "boolean" ||
       (decoded.sourceCursor !== null &&
         typeof decoded.sourceCursor !== "string")
     )
@@ -449,13 +478,18 @@ async function lineCandidates(
   }
 ) {
   const seen = new Set<string>()
-  const orders: Doc<"orders">[] = []
+  const orderIds: Id<"orders">[] = []
   for (const line of page.page) {
     if (seen.has(`${line.orderId}`)) continue
     seen.add(`${line.orderId}`)
-    const order = await ctx.db.get(line.orderId)
-    if (order) orders.push(order)
+    orderIds.push(line.orderId)
   }
+  // normalizeLines guarantees one captured line per item per order. The
+  // source page is capped, so these are bounded hydrations, not membership
+  // probes across an unbounded result set.
+  const orders = (await Promise.all(orderIds.map((orderId) => ctx.db.get(orderId)))).filter(
+    (order): order is Doc<"orders"> => order !== null
+  )
   return { orders, continueCursor: page.continueCursor, isDone: page.isDone }
 }
 
@@ -552,6 +586,44 @@ async function orderCandidates(
         isDone: page.isDone,
       }
     }
+    case "fulfillmentOptionPayment": {
+      const page = await ctx.db
+        .query("orders")
+        .withIndex(
+          "by_eventId_and_fulfillmentOptionId_and_paymentStatus_and_updatedAt",
+          (q) =>
+            q
+              .eq("eventId", args.eventId)
+              .eq("fulfillmentOptionId", args.fulfillmentOptionId!)
+              .eq("paymentStatus", args.paymentStatus!)
+        )
+        .order("desc")
+        .paginate({ cursor, numItems })
+      return {
+        orders: page.page,
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+      }
+    }
+    case "fulfillmentOptionProgress": {
+      const page = await ctx.db
+        .query("orders")
+        .withIndex(
+          "by_eventId_and_fulfillmentOptionId_and_progress_and_updatedAt",
+          (q) =>
+            q
+              .eq("eventId", args.eventId)
+              .eq("fulfillmentOptionId", args.fulfillmentOptionId!)
+              .eq("progress", args.progress!)
+        )
+        .order("desc")
+        .paginate({ cursor, numItems })
+      return {
+        orders: page.page,
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+      }
+    }
     case "payment": {
       const page = await ctx.db
         .query("orders")
@@ -559,6 +631,23 @@ async function orderCandidates(
           q
             .eq("eventId", args.eventId)
             .eq("paymentStatus", args.paymentStatus!)
+        )
+        .order("desc")
+        .paginate({ cursor, numItems })
+      return {
+        orders: page.page,
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+      }
+    }
+    case "paymentProgress": {
+      const page = await ctx.db
+        .query("orders")
+        .withIndex("by_eventId_and_paymentStatus_and_progress_and_updatedAt", (q) =>
+          q
+            .eq("eventId", args.eventId)
+            .eq("paymentStatus", args.paymentStatus!)
+            .eq("progress", args.progress!)
         )
         .order("desc")
         .paginate({ cursor, numItems })
@@ -589,6 +678,44 @@ async function orderCandidates(
           q
             .eq("eventId", args.eventId)
             .eq("fulfillmentType", args.fulfillmentType!)
+        )
+        .order("desc")
+        .paginate({ cursor, numItems })
+      return {
+        orders: page.page,
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+      }
+    }
+    case "fulfillmentTypePayment": {
+      const page = await ctx.db
+        .query("orders")
+        .withIndex(
+          "by_eventId_and_fulfillmentType_and_paymentStatus_and_updatedAt",
+          (q) =>
+            q
+              .eq("eventId", args.eventId)
+              .eq("fulfillmentType", args.fulfillmentType!)
+              .eq("paymentStatus", args.paymentStatus!)
+        )
+        .order("desc")
+        .paginate({ cursor, numItems })
+      return {
+        orders: page.page,
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+      }
+    }
+    case "fulfillmentTypeProgress": {
+      const page = await ctx.db
+        .query("orders")
+        .withIndex(
+          "by_eventId_and_fulfillmentType_and_progress_and_updatedAt",
+          (q) =>
+            q
+              .eq("eventId", args.eventId)
+              .eq("fulfillmentType", args.fulfillmentType!)
+              .eq("progress", args.progress!)
         )
         .order("desc")
         .paginate({ cursor, numItems })
@@ -629,36 +756,48 @@ async function listOrders(ctx: QueryCtx, args: OrderListArgs) {
   const page: Doc<"orders">[] = []
   const pending = [...cursor.pending]
   let sourceCursor = cursor.sourceCursor
-  while (pending.length > 0 && page.length < requested) {
+  let sourceDone = cursor.sourceDone
+  let pendingReads = 0
+  while (
+    pending.length > 0 &&
+    page.length < requested &&
+    pendingReads < ORDER_SOURCE_PAGE_SIZE
+  ) {
     const order = await ctx.db.get(pending.shift() as Id<"orders">)
+    pendingReads += 1
     if (order && matchesOrderFilters(order, args, search))
       page.push(order)
   }
-  let isDone = false
-  while (page.length < requested && !isDone) {
+  if (page.length < requested && !sourceDone) {
     const candidates = await orderCandidates(
       ctx,
       args,
       search,
       source,
       sourceCursor,
-      50
+      ORDER_SOURCE_PAGE_SIZE
     )
     sourceCursor = candidates.continueCursor
-    isDone = candidates.isDone
+    sourceDone = candidates.isDone
     for (const order of candidates.orders) {
       if (!matchesOrderFilters(order, args, search)) continue
       if (page.length < requested) page.push(order)
       else pending.push(`${order._id}`)
     }
   }
-  const resultIsDone = isDone && pending.length === 0
+  const resultIsDone = sourceDone && pending.length === 0
   return {
     page: page.map(summaryOrder),
     isDone: resultIsDone,
     continueCursor: resultIsDone
       ? ""
-      : encodeOrderListCursor({ source, sourceCursor, pending, filterKey }),
+      : encodeOrderListCursor({
+          source,
+          sourceCursor,
+          pending,
+          sourceDone,
+          filterKey,
+        }),
   }
 }
 
@@ -956,7 +1095,7 @@ export const getExportPage = internalQuery({
       search,
       source,
       cursor.sourceCursor,
-      25
+      ORDER_SOURCE_PAGE_SIZE
     )
     const rows: ExportRow[] = []
     for (const order of page.orders) {
@@ -965,28 +1104,29 @@ export const getExportPage = internalQuery({
         .query("orderLines")
         .withIndex("by_orderId", (q) => q.eq("orderId", order._id))
         .take(100)
+      // Item filtering selects an order. Once selected, a spreadsheet keeps
+      // its complete captured record: one row for every line in that order.
       for (const line of lines)
-        if (!args.itemId || line.itemId === args.itemId)
-          rows.push({
-            reference: order.reference,
-            guestName: order.guestName ?? "",
-            guestEmail: order.guestEmail ?? "",
-            guestPhone: order.guestPhone ?? "",
-            item: line.itemName,
-            quantity: line.quantity,
-            unitPriceMinor: line.unitPriceMinor,
-            lineTotalMinor: line.lineTotalMinor,
-            orderTotalMinor: order.totalMinor,
-            currency: order.currency ?? "",
-            paymentStatus: order.paymentStatus,
-            progress: order.progress,
-            fulfillment: order.fulfillmentOptionName ?? "",
-            fulfillmentType: order.fulfillmentType ?? "",
-            submittedAt: order.submittedAt ?? order.createdAt,
-            reviewedAt: order.reviewedAt ?? "",
-            fulfilledAt: order.progress === "fulfilled" ? order.updatedAt : "",
-            timeZone: event.timeZone ?? "UTC",
-          })
+        rows.push({
+          reference: order.reference,
+          guestName: order.guestName ?? "",
+          guestEmail: order.guestEmail ?? "",
+          guestPhone: order.guestPhone ?? "",
+          item: line.itemName,
+          quantity: line.quantity,
+          unitPriceMinor: line.unitPriceMinor,
+          lineTotalMinor: line.lineTotalMinor,
+          orderTotalMinor: order.totalMinor,
+          currency: order.currency ?? "",
+          paymentStatus: order.paymentStatus,
+          progress: order.progress,
+          fulfillment: order.fulfillmentOptionName ?? "",
+          fulfillmentType: order.fulfillmentType ?? "",
+          submittedAt: order.submittedAt ?? order.createdAt,
+          reviewedAt: order.reviewedAt ?? "",
+          fulfilledAt: order.progress === "fulfilled" ? order.updatedAt : "",
+          timeZone: event.timeZone ?? "UTC",
+        })
     }
     return {
       rows,

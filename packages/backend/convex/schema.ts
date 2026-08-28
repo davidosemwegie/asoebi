@@ -180,6 +180,24 @@ export default defineSchema({
       "fulfillmentOptionId",
       "updatedAt",
     ])
+    .index("by_eventId_and_fulfillmentOptionId_and_paymentStatus_and_updatedAt", [
+      "eventId",
+      "fulfillmentOptionId",
+      "paymentStatus",
+      "updatedAt",
+    ])
+    .index("by_eventId_and_fulfillmentOptionId_and_progress_and_updatedAt", [
+      "eventId",
+      "fulfillmentOptionId",
+      "progress",
+      "updatedAt",
+    ])
+    .index("by_eventId_and_paymentStatus_and_progress_and_updatedAt", [
+      "eventId",
+      "paymentStatus",
+      "progress",
+      "updatedAt",
+    ])
     .index("by_eventId_and_fulfillmentOptionId_and_lifecycle", [
       "eventId",
       "fulfillmentOptionId",
@@ -188,6 +206,18 @@ export default defineSchema({
     .index("by_eventId_and_fulfillmentType_and_updatedAt", [
       "eventId",
       "fulfillmentType",
+      "updatedAt",
+    ])
+    .index("by_eventId_and_fulfillmentType_and_paymentStatus_and_updatedAt", [
+      "eventId",
+      "fulfillmentType",
+      "paymentStatus",
+      "updatedAt",
+    ])
+    .index("by_eventId_and_fulfillmentType_and_progress_and_updatedAt", [
+      "eventId",
+      "fulfillmentType",
+      "progress",
       "updatedAt",
     ])
     .searchIndex("search_eventId_and_text", {
